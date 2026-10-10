@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dist-electron/
+dist-mcp/
+work/
+test-results/
+package-lock.json
+LICENSE
