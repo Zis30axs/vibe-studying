@@ -20,6 +20,9 @@ async function launch() {
   delete env.DEEPSEEK_API_KEY
   delete env.EXAMCRAFT_DEEPSEEK_MODEL
   app = await electron.launch({ args: ['.'], env })
+  // Electron contexts are created outside Playwright's page fixture, so the
+  // configured test trace alone does not contain their snapshots or input log.
+  await app.context().tracing.start({ screenshots: true, snapshots: true, sources: true })
   const page = await app.firstWindow()
   page.on('pageerror', (error) => pageErrors.push(error.message))
   await expect(page.getByRole('heading', { name: '今天，理解得更深一点。' })).toBeVisible()
@@ -39,7 +42,20 @@ test.beforeEach(async () => {
   userData = await mkdtemp(join(tmpdir(), 'examcraft-humanities-e2e-'))
 })
 
-test.afterEach(async () => {
+test.afterEach(async ({}, testInfo) => {
+  if (app) {
+    const tracePath = testInfo.outputPath('electron-trace.zip')
+    const failed = testInfo.status !== testInfo.expectedStatus || pageErrors.length > 0
+    const window = app.windows().find((window) => !window.isClosed())
+    if (failed && window)
+      await testInfo.attach('electron-screenshot', {
+        body: await window.screenshot({ fullPage: true }),
+        contentType: 'image/png',
+      })
+    await app.context().tracing.stop(failed ? { path: tracePath } : {})
+    if (failed)
+      await testInfo.attach('electron-trace', { path: tracePath, contentType: 'application/zip' })
+  }
   await app?.close()
   app = undefined
   const resolvedData = resolve(userData)
@@ -92,15 +108,42 @@ async function addWithKeyboard(page: Page, kind: string, target = 'drop-root') {
 
 async function addWithDrag(page: Page, kind: string, target = 'drop-root') {
   const before = await nodeIds(page)
-  // Playwright sends real pointer input through Chromium's HTML drag-and-drop path;
-  // this deliberately does not inject DOM events or call the model's move helpers.
-  await page.getByTestId(`palette-${kind}`).dragTo(page.getByTestId(target))
+  await nativeDrag(page, page.getByTestId(`palette-${kind}`), page.getByTestId(target))
   await expect(nodes(page)).toHaveCount(before.length + 1)
   return (await nodeIds(page)).find((id) => !before.includes(id))!
 }
 
 async function moveWithDrag(page: Page, id: string, target: string) {
-  await page.getByTestId(`drag-${id}`).dragTo(page.getByTestId(target))
+  await nativeDrag(page, page.getByTestId(`drag-${id}`), page.getByTestId(target))
+}
+
+async function nativeDrag(page: Page, source: Locator, target: Locator) {
+  // Start Chromium's native drag before scrolling the destination into view.
+  // dragTo scrolls after mouse-down but before its first pressed movement; when
+  // that moves the source away, Chromium can cancel the drag before dragstart.
+  // Only real pointer input is used here, with no injected events or model calls.
+  await source.hover()
+  const start = await source.boundingBox()
+  if (!start) throw new Error('Drag source has no visible bounds')
+  await page.mouse.down()
+  try {
+    await page.mouse.move(start.x + start.width / 2 + 10, start.y + start.height / 2, {
+      steps: 5,
+    })
+    await expect(source).toHaveAttribute('aria-pressed', 'true')
+    await expect(target).toBeEnabled()
+    await target.scrollIntoViewIfNeeded()
+    const end = await target.boundingBox()
+    if (!end) throw new Error('Drop socket has no visible bounds')
+    const x = end.x + end.width / 2
+    const y = end.y + end.height / 2
+    await page.mouse.move(x, y, { steps: 12 })
+    // The first arrival may emit dragenter; another native move emits dragover.
+    await page.mouse.move(x, y)
+    await expect(target).toHaveClass(/\bis-over\b/)
+  } finally {
+    await page.mouse.up()
+  }
 }
 
 async function selectSubject(page: Page, subject: string, title: string) {

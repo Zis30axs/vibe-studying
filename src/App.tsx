@@ -653,7 +653,7 @@ export default function App() {
                                 selected.kind,
                               ) && (
                                 <HumanitiesComposer
-                                  key={selected.id}
+                                  key={`argument-${selected.id}`}
                                   subject={selected.subject}
                                   draft={draft}
                                   onChange={updateDraft}
@@ -662,7 +662,7 @@ export default function App() {
                               )}
                               {selected.kind === 'geography' && (
                                 <GeographyWorkbench
-                                  key={selected.id}
+                                  key={`geography-${selected.id}`}
                                   drawing={draft.drawing}
                                   onChange={(drawing) => updateDraft({ ...draft, drawing })}
                                   disabled={busy}
@@ -670,7 +670,7 @@ export default function App() {
                               )}
                               {selected.subject === 'math' && (
                                 <MathWorkbench
-                                  key={selected.id}
+                                  key={`math-${selected.id}`}
                                   value={draft.math ?? emptyMathState()}
                                   onChange={(math) => updateDraft({ ...draft, math })}
                                   disabled={busy}
@@ -833,7 +833,8 @@ export default function App() {
                                   (provider === 'deepseek' && (!cloudReady || !cloudConsent))
                                 }
                               >
-                                {busy ? '正在审阅…' : '提交并审阅'} <span>→</span>
+                                {busy ? '正在审阅…' : '提交并审阅'}{' '}
+                                <span aria-hidden="true">→</span>
                               </button>
                             </div>
                           </>
