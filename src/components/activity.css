@@ -1,0 +1,197 @@
+.activity-heatmap {
+  --activity-cell-size: 15px;
+  --activity-cell-gap: 4px;
+  padding: 20px 22px 16px;
+  margin-bottom: 22px;
+  min-width: 0;
+  border: 1px solid #dfe7e3;
+  border-radius: 11px;
+  background: #fff;
+}
+.activity-heatmap .activity-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.activity-heatmap .activity-heading h2 {
+  font-size: 16px;
+}
+.activity-heatmap .activity-heading p,
+.activity-heatmap .activity-timezone,
+.activity-heatmap .activity-hint,
+.activity-heatmap .activity-footer,
+.activity-heatmap .activity-empty {
+  color: #62786f;
+  font-size: 11px;
+}
+.activity-heatmap .activity-timezone {
+  white-space: nowrap;
+}
+.activity-heatmap .activity-hint {
+  margin: 8px 0 12px;
+}
+.activity-heatmap .activity-scroll {
+  overflow-x: auto;
+  padding: 4px 4px 9px;
+}
+.activity-heatmap .activity-chart {
+  display: flex;
+  gap: var(--activity-cell-gap);
+  width: max-content;
+}
+.activity-heatmap .activity-week {
+  width: var(--activity-cell-size);
+  flex-shrink: 0;
+}
+.activity-heatmap .activity-week-days,
+.activity-heatmap .activity-weekdays {
+  display: grid;
+  gap: var(--activity-cell-gap);
+}
+.activity-heatmap .activity-weekdays {
+  margin-right: 7px;
+}
+.activity-heatmap .activity-weekdays span {
+  height: var(--activity-cell-size);
+  line-height: var(--activity-cell-size);
+  font-size: 10px;
+  color: #6e7f76;
+}
+.activity-heatmap .activity-month,
+.activity-heatmap .activity-weekdays span:first-child {
+  display: block;
+  height: 20px;
+  line-height: 16px;
+}
+.activity-heatmap .activity-month {
+  font-size: 10px;
+  color: #64796d;
+  white-space: nowrap;
+  margin-bottom: var(--activity-cell-gap);
+}
+.activity-heatmap .activity-day,
+.activity-heatmap .activity-swatch {
+  --activity-color: #edf1ee;
+  display: block;
+  width: var(--activity-cell-size);
+  height: var(--activity-cell-size);
+  border: 1px solid #223c2b12;
+  border-radius: 3px;
+  background: var(--activity-color);
+  padding: 0;
+}
+.activity-heatmap [data-level='1'] {
+  --activity-color: #c6e9c8;
+}
+.activity-heatmap [data-level='2'] {
+  --activity-color: #7dc98c;
+}
+.activity-heatmap [data-level='3'] {
+  --activity-color: #3da66a;
+}
+.activity-heatmap [data-level='4'] {
+  --activity-color: #178049;
+}
+.activity-heatmap .activity-day:hover {
+  background: var(--activity-color);
+  border-color: #375f44;
+}
+.activity-heatmap .activity-day {
+  touch-action: manipulation;
+}
+.activity-heatmap .activity-day[aria-pressed='true'] {
+  outline: 1px solid #375f44;
+  outline-offset: 1px;
+}
+.activity-heatmap .activity-day:focus-visible {
+  outline: 3px solid #205971;
+  outline-offset: 2px;
+  position: relative;
+  z-index: 1;
+}
+.activity-heatmap .activity-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.activity-heatmap .activity-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.activity-heatmap .activity-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.activity-heatmap .activity-swatch {
+  width: 11px;
+  height: 11px;
+}
+.activity-heatmap .activity-details {
+  border-top: 1px solid #edf1ee;
+  padding-top: 12px;
+  margin-top: 14px;
+}
+.activity-heatmap .activity-details h3 {
+  font-size: 12px;
+  font-weight: 600;
+}
+.activity-heatmap .activity-empty {
+  margin-top: 5px;
+}
+.activity-heatmap .activity-records {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
+  gap: 7px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.activity-heatmap .activity-records button {
+  width: 100%;
+  text-align: left;
+  padding: 8px 11px;
+}
+.activity-heatmap .activity-record-title {
+  display: block;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.activity-heatmap .activity-record-meta {
+  display: block;
+  font-size: 10px;
+  color: #6b7e73;
+  margin-top: 2px;
+}
+.activity-heatmap .activity-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 600px) {
+  .activity-heatmap {
+    padding: 16px 12px;
+  }
+  .activity-heatmap .activity-timezone {
+    font-size: 10px;
+  }
+}
+@media (pointer: coarse) {
+  .activity-heatmap {
+    --activity-cell-size: 28px;
+    --activity-cell-gap: 5px;
+  }
+}

@@ -1,10 +1,15 @@
-name: ExamCraft checks
+name: ExamCraft checks and release
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: examcraft-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   verify:
     strategy:
@@ -12,20 +17,114 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
       - run: npm ci
       - run: npm run check
+      # No grep/filter: math, humanities, heatmap and all existing desktop tests run.
       - if: runner.os == 'Windows'
         run: npm run test:e2e
+      - if: runner.os == 'Windows'
+        run: npm run package:win
+      - if: runner.os == 'Windows'
+        run: npm run test:packaged
+      - if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: work/release/*
+          if-no-files-found: error
+          retention-days: 14
       - if: failure() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: desktop-test-results
           path: test-results/
           retention-days: 7
+  publish:
+    needs: verify
+    if: >-
+      github.repository == 'Zis30axs/vibe-studying' &&
+      github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: examcraft-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: work/release
+      - name: Check version and preserve existing releases
+        id: release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const { version } = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Expected a stable version');
+            const tag = `v${version}`;
+            const notes = `docs/releases/${tag}.md`;
+            if (!fs.existsSync(notes)) throw new Error(`Missing ${notes}`);
+            if (context.ref.startsWith('refs/tags/') && context.ref !== `refs/tags/${tag}`)
+              throw new Error('Tag does not match package version');
+            const target = { owner: context.repo.owner, repo: context.repo.repo };
+            let tagCommit;
+            try {
+              const { data } = await github.rest.git.getRef({ ...target, ref: `tags/${tag}` });
+              let object = data.object;
+              while (object.type === 'tag') {
+                const tagged = await github.rest.git.getTag({ ...target, tag_sha: object.sha });
+                object = tagged.data.object;
+              }
+              if (object.type !== 'commit' || object.sha !== context.sha)
+                throw new Error(`Existing ${tag} points to another commit; bump the version instead of overwriting it`);
+              tagCommit = object.sha;
+            } catch (error) { if (error.status !== 404) throw error; }
+            try {
+              const { data } = await github.rest.repos.getReleaseByTag({ ...target, tag });
+              if (data.draft) throw new Error(`Existing draft ${tag} requires manual review; refusing to overwrite it`);
+              if (tagCommit !== context.sha) throw new Error('Existing release tag is not the verified commit');
+              const expected = [`ExamCraft-${version}-win-x64.zip`, `ExamCraft-${version}-source.zip`, 'SHA256SUMS.txt'];
+              if (!expected.every(name => data.assets.some(asset => asset.name === name && asset.state === 'uploaded' && asset.size > 0)))
+                throw new Error(`Existing ${tag} is incomplete; refusing to replace or append assets`);
+              core.notice(`${tag} already exists for this commit; no tags or assets will be changed.`);
+              core.setOutput('create', 'false');
+              return;
+            } catch (error) { if (error.status !== 404) throw error; }
+            core.setOutput('tag', tag);
+            core.setOutput('version', version);
+            core.setOutput('create', 'true');
+      - name: Verify downloaded asset checksums
+        if: steps.release.outputs.create == 'true'
+        working-directory: work/release
+        run: sha256sum --check SHA256SUMS.txt
+      - name: Create versioned GitHub Release
+        if: steps.release.outputs.create == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            "work/release/ExamCraft-${RELEASE_VERSION}-win-x64.zip" \
+            "work/release/ExamCraft-${RELEASE_VERSION}-source.zip" \
+            "work/release/SHA256SUMS.txt" \
+            --target "$GITHUB_SHA" \
+            --title "ExamCraft $RELEASE_TAG" \
+            --notes-file "docs/releases/${RELEASE_TAG}.md"

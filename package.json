@@ -1,6 +1,6 @@
 {
   "name": "examcraft",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "An offline-first subject IDE for deliberate exam practice",
   "private": true,
   "license": "GPL-3.0-only",
@@ -19,7 +19,9 @@
     "test": "vitest run",
     "test:e2e": "npm run build && playwright test",
     "check": "npm run typecheck && npm test && npm run build",
-    "mcp": "node dist-mcp/server.cjs"
+    "mcp": "node dist-mcp/server.cjs",
+    "package:win": "npm run build && node scripts/package-windows.mjs",
+    "test:packaged": "node scripts/smoke-packaged.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
@@ -39,5 +41,6 @@
     "typescript": "~5.9.3",
     "vite": "8.3.4",
     "vitest": "^4.0.18"
-  }
+  },
+  "productName": "ExamCraft"
 }

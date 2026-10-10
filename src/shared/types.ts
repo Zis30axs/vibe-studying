@@ -1,6 +1,19 @@
 export type Subject = 'chinese' | 'math' | 'english' | 'politics' | 'history' | 'geography'
 export type QuestionKind = 'choice' | Subject
 export type BlockCategory = 'principle' | 'material' | 'analysis' | 'conclusion'
+export type ArgumentContainerKind = 'cause' | 'contrast' | 'point'
+export type ArgumentKind = BlockCategory | ArgumentContainerKind
+export interface ArgumentNode {
+  id: string
+  kind: ArgumentKind
+  text: string
+  /** Only cause, contrast, and point containers may have children. */
+  children: ArgumentNode[]
+}
+export interface ArgumentDocument {
+  version: 1
+  roots: ArgumentNode[]
+}
 export interface AnswerBlock {
   id: string
   category: BlockCategory
@@ -44,11 +57,31 @@ export interface GeoDrawing {
   lines: GeoLine[]
   mode: 'cartesian' | 'geographic'
 }
+export interface MathParameters {
+  a: number
+  b: number
+  c: number
+}
+export interface MathWorkbenchState {
+  drawing: GeoDrawing
+  expression: string
+  parameters: MathParameters
+  measurement: string[]
+}
+export const emptyMathState = (): MathWorkbenchState => ({
+  drawing: { points: [], lines: [], mode: 'cartesian' },
+  expression: 'a*x^2+b*x+c',
+  parameters: { a: 1, b: 0, c: 0 },
+  measurement: [],
+})
 export interface AnswerDraft {
   choiceId?: string
+  math?: MathWorkbenchState
   text: string
   blocks: AnswerBlock[]
   drawing: GeoDrawing
+  /** Optional so existing version-1 drafts and attempt snapshots remain readable. */
+  argument?: ArgumentDocument
 }
 export interface RubricResult {
   id: string
@@ -98,6 +131,7 @@ export interface ExamCraftApi {
   getCapabilities(): Promise<Capabilities>
 }
 export const emptyDraft = (): AnswerDraft => ({
+  math: emptyMathState(),
   text: '',
   blocks: [],
   drawing: { points: [], lines: [], mode: 'cartesian' },

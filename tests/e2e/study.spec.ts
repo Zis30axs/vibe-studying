@@ -74,41 +74,6 @@ test('choice answer, exact feedback, retry history, draft and restart persistenc
   await expect(page.getByText('先核对实践与认识的关系。', { exact: true })).toBeVisible()
 })
 
-test('politics block instances edit independently, reorder and persist reviewed answer', async () => {
-  let page = await launch()
-  await page.getByRole('button', { name: /政治组装 Argument/ }).click()
-  const add = page.getByRole('button', { name: '添加模块：原理 · 实践与认识' })
-  await add.click()
-  await add.click()
-  await page.getByLabel('模块标题', { exact: true }).first().fill('')
-  await expect(page.getByRole('alert')).toHaveCount(0)
-  await page.getByLabel('模块标题', { exact: true }).first().fill('自己的论点')
-  await page
-    .getByLabel('模块正文', { exact: true })
-    .first()
-    .fill('实践决定认识。通过走访调查，在试点中检验并完善方案。')
-  await expect(page.getByLabel('模块正文', { exact: true }).nth(1)).toHaveValue(
-    '实践是认识的来源，也是检验认识真理性的唯一标准。',
-  )
-  await page.getByRole('button', { name: /上移第 2 个模块/ }).click()
-  await expect(page.getByLabel('模块标题', { exact: true }).nth(1)).toHaveValue('自己的论点')
-  await page.getByRole('button', { name: /移除第 1 个模块/ }).click()
-  await expect(page.getByLabel('模块正文', { exact: true })).toHaveCount(1)
-  await page.getByRole('button', { name: '提交并审阅' }).click()
-  await expect(page.getByLabel('审阅结果').locator('.score')).toHaveText('12 / 12')
-  await expect(page.getByText(/不代表考试阅卷分数/)).toBeVisible()
-  await app!.close()
-  app = undefined
-  page = await launch()
-  await page.getByRole('button', { name: /政治组装 Argument/ }).click()
-  await expect(page.getByLabel('模块标题', { exact: true })).toHaveValue('自己的论点')
-  await expect(page.getByLabel('模块正文', { exact: true })).toHaveValue(
-    '实践决定认识。通过走访调查，在试点中检验并完善方案。',
-  )
-  await page.evaluate(() => window.scrollTo(0, 0))
-  await page.screenshot({ path: 'test-results/examcraft-politics.png', fullPage: true })
-})
-
 test('native JSON import succeeds once, duplicate import preserves existing bank', async () => {
   let page = await launch()
   await app!.evaluate(({ dialog }, filePath) => {

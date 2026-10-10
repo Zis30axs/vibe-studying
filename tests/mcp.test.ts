@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { McpAgentAdapter, McpQuestionBankAdapter } from '../src/adapters/mcp-adapters'
-import { emptyDraft } from '../src/shared/types'
+import { emptyDraft, type ArgumentNode } from '../src/shared/types'
 
 describe('real MCP stdio client/server', () => {
   let directory: string
@@ -126,8 +126,44 @@ describe('new subjects over real MCP stdio', () => {
         const review = await new McpAgentAdapter(client).review(written, {
           ...emptyDraft(),
           text: written.rubric!.map((r) => r.keywords[0]).join(' '),
+          ...(subject === 'math'
+            ? {
+                math: {
+                  expression: 'a*x^2+b*x+c',
+                  parameters: { a: 1, b: 0, c: -1 },
+                  drawing: {
+                    mode: 'cartesian' as const,
+                    points: [
+                      { id: 'A', x: 0, y: 0, label: 'A' },
+                      { id: 'B', x: 3, y: 4, label: 'B' },
+                    ],
+                    lines: [],
+                  },
+                  measurement: ['A', 'B'],
+                },
+              }
+            : {}),
         })
         expect(review.score).toBe(written.maxScore)
+        if (subject === 'math') {
+          const invalidMath = await client.callTool({
+            name: 'review_answer',
+            arguments: {
+              questionId: written.id,
+              draft: {
+                ...emptyDraft(),
+                text: '合成数学答案',
+                math: {
+                  expression: 'x^2',
+                  parameters: { a: 1, b: 0, c: 0 },
+                  drawing: { mode: 'cartesian', points: [], lines: [] },
+                  measurement: ['missing-point'],
+                },
+              },
+            },
+          })
+          expect(invalidMath.isError).toBe(true)
+        }
         const forbidden = await client.callTool({
           name: 'review_answer',
           arguments: { questionId: 'pol-choice-1', draft: { ...emptyDraft(), choiceId: 'A' } },
@@ -138,4 +174,86 @@ describe('new subjects over real MCP stdio', () => {
       }
     },
   )
+  it('publishes bounded argument input and reviews only the current final answer over stdio', async () => {
+    const client = new Client({ name: 'nested-argument-test', version: '1.0.0' })
+    try {
+      await client.connect(
+        new StdioClientTransport({
+          command: process.execPath,
+          args: [output, '--subject', 'history'],
+          stderr: 'pipe',
+        }),
+      )
+      const tools = await client.listTools()
+      const schema = tools.tools.find((tool) => tool.name === 'review_answer')!.inputSchema
+      expect(JSON.stringify(schema)).toContain('"argument"')
+      expect(JSON.stringify(schema)).toContain('"cause"')
+      const bank = new McpQuestionBankAdapter(client)
+      const question = (await bank.list()).find((q) => q.kind === 'history')!
+      const current = question.rubric!.map((r) => r.keywords[0]).join(' ')
+      const roots: ArgumentNode[] = [
+        {
+          id: 'point',
+          kind: 'point',
+          text: '观点',
+          children: [
+            {
+              id: 'cause',
+              kind: 'cause',
+              text: '因果',
+              children: [{ id: 'material', kind: 'material', text: current, children: [] }],
+            },
+          ],
+        },
+      ]
+      const draft = { ...emptyDraft(), text: current, argument: { version: 1 as const, roots } }
+      const agent = new McpAgentAdapter(client)
+      expect((await agent.review(question, draft)).score).toBe(question.maxScore)
+      expect((await agent.review(question, { ...draft, text: '未覆盖要点的答案' })).score).toBe(0)
+      for (const invalidRoots of [
+        [roots[0], structuredClone(roots[0])],
+        [{ id: 'leaf', kind: 'analysis', text: '', children: roots }],
+        [
+          {
+            id: 'too-many',
+            kind: 'point',
+            text: '',
+            children: Array.from({ length: 80 }, (_, i) => ({
+              id: `child-${i}`,
+              kind: 'analysis',
+              text: '',
+              children: [],
+            })),
+          },
+        ],
+      ]) {
+        const invalid = await client.callTool({
+          name: 'review_answer',
+          arguments: {
+            questionId: question.id,
+            draft: {
+              ...draft,
+              argument: { version: 1, roots: invalidRoots },
+            },
+          },
+        })
+        expect(invalid.isError).toBe(true)
+      }
+      const missingFinal = await client.callTool({
+        name: 'review_answer',
+        arguments: {
+          questionId: question.id,
+          draft: { ...draft, text: '' },
+        },
+      })
+      expect(missingFinal.isError).toBe(true)
+      // A rejected structured draft must not break the server or widen its scope.
+      expect((await bank.list()).every((q) => q.subject === 'history')).toBe(true)
+      expect((await agent.review(question, { ...emptyDraft(), text: current })).score).toBe(
+        question.maxScore,
+      )
+    } finally {
+      await client.close()
+    }
+  })
 })

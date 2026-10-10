@@ -1,5 +1,6 @@
 import { subjectGuidance } from '../shared/subjects'
 import type { AnswerDraft, Question } from '../shared/types'
+import { finalAnswerText } from '../domain/argument'
 import { validateAnswer } from '../domain/schemas'
 import type { AgentAdapter, Review } from './contracts'
 
@@ -21,10 +22,7 @@ export class LocalRuleAgent implements AgentAdapter {
         reviewer: this.name,
       }
     }
-    const text = [draft.text, ...draft.blocks.map((block) => block.text)]
-      .join('\n')
-      .normalize('NFKC')
-      .toLowerCase()
+    const text = finalAnswerText(draft).normalize('NFKC').toLowerCase()
     const rubric = (question.rubric ?? []).map((item) => {
       const found = item.keywords.find((keyword) =>
         question.subject === 'english'
@@ -50,7 +48,7 @@ export class LocalRuleAgent implements AgentAdapter {
       score: rubric.reduce((total, item) => total + item.earned, 0),
       maxScore: question.maxScore,
       feedback:
-        '这是关键词覆盖度提示，不代表考试得分。规则不理解语义、否定或论证逻辑，也不评价模块顺序。' +
+        '这是关键词覆盖度提示，不代表考试得分。规则不理解语义、否定或论证逻辑，也不评价模块顺序、嵌套结构或因果关系。' +
         subjectGuidance[question.subject].local,
       explanation: question.explanation,
       rubric,

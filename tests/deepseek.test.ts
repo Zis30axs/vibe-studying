@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DeepSeekAgent } from '../src/adapters/deepseek-agent'
-import { emptyDraft, type Question } from '../src/shared/types'
+import { emptyDraft, type ArgumentNode, type Question } from '../src/shared/types'
 
 const key = 'synthetic-key-never-used-on-network'
 const question: Question = {
@@ -114,6 +114,56 @@ describe('DeepSeek main-process adapter with synthetic mocked HTTP only', () => 
     expect(data.question.blocks).toBeUndefined()
     expect(JSON.stringify(data)).not.toContain('unused bank block')
     expect(JSON.stringify(body)).not.toContain(key)
+  })
+
+  it('sends the nested structure and current final text without stale legacy blocks', async () => {
+    const fetcher = mock(json(completion()))
+    const argument = {
+      version: 1 as const,
+      roots: [
+        {
+          id: 'cause',
+          kind: 'cause' as const,
+          text: '位置与依据',
+          children: [
+            {
+              id: 'material',
+              kind: 'material' as const,
+              text: '结构草稿中的材料',
+              children: [],
+            },
+          ],
+        },
+      ],
+    }
+    await agent(fetcher).review(question, {
+      ...draft,
+      argument,
+      blocks: [
+        { id: 'stale', category: 'analysis', label: 'stale', text: 'obsolete legacy content' },
+      ],
+    })
+    const body = JSON.parse(fetcher.mock.calls[0][1]!.body as string)
+    const data = JSON.parse(body.messages[1].content)
+    expect(data.answer.text).toBe(draft.text)
+    expect(data.answer.argument).toEqual(argument)
+    expect(data.answer.blocks).toBeUndefined()
+    expect(JSON.stringify(data)).not.toContain('obsolete legacy content')
+    expect(body.messages[0].content).toContain('只依据最终答案给分')
+    expect(body.messages[0].content).toContain('argument 是结构参考')
+  })
+
+  it('rejects an unsafe argument graph before attempting the provider request', async () => {
+    const fetcher = mock(json(completion()))
+    const root: ArgumentNode = { id: 'cycle', kind: 'cause', text: '', children: [] }
+    root.children.push(root)
+    await expect(
+      agent(fetcher).review(question, {
+        ...draft,
+        argument: { version: 1, roots: [root] },
+      }),
+    ).rejects.toThrow('未发送到 DeepSeek')
+    expect(fetcher).not.toHaveBeenCalled()
   })
 
   it.each(['A', 'B'])(

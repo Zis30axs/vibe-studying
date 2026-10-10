@@ -1,14 +1,25 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AnswerDraft, Attempt, Capabilities, Question, StudyState } from './shared/types'
-import { emptyDraft } from './shared/types'
+import type {
+  AnswerDraft,
+  ArgumentNode,
+  Attempt,
+  Capabilities,
+  Question,
+  StudyState,
+} from './shared/types'
+import { emptyDraft, emptyMathState } from './shared/types'
 import { subjects, subjectLabel, kindLabel, subjectGuidance } from './shared/subjects'
-import { PoliticsComposer } from './components/PoliticsComposer'
+import { HumanitiesComposer } from './components/HumanitiesComposer'
+import { ActivityHeatmap } from './components/ActivityHeatmap'
+import { generateArgumentText } from './domain/argument'
 import { GeographyWorkbench } from './components/GeographyWorkbench'
+import { MathWorkbench } from './components/MathWorkbench'
 
-type View = 'practice' | 'politics' | 'geography' | 'history' | 'adapters'
+type View = 'practice' | 'math' | 'politics' | 'geography' | 'history' | 'adapters'
 const navigation: { id: View; icon: string; label: string; caption: string }[] = [
   { id: 'practice', icon: '▤', label: '题目练习', caption: 'Practice' },
-  { id: 'politics', icon: '▦', label: '政治组装', caption: 'Argument builder' },
+  { id: 'math', icon: 'ƒ', label: '数学工作台', caption: 'Math lab' },
+  { id: 'politics', icon: '▦', label: '文科组装', caption: 'Argument builder' },
   { id: 'geography', icon: '◎', label: '地理工作台', caption: 'Geo canvas' },
   { id: 'history', icon: '◷', label: '练习记录', caption: 'Review & reflect' },
   { id: 'adapters', icon: '⌘', label: '题库与 Agent', caption: 'Connections' },
@@ -23,6 +34,29 @@ const dateText = (date: string) =>
     hour: '2-digit',
     minute: '2-digit',
   })
+
+const argumentNames: Record<ArgumentNode['kind'], string> = {
+  principle: '观点 / 原理',
+  material: '材料 / 依据',
+  analysis: '分析',
+  conclusion: '结论',
+  cause: '因果',
+  contrast: '对比',
+  point: '分点',
+}
+function ArgumentSnapshot({ nodes }: { nodes: ArgumentNode[] }) {
+  return (
+    <ol className="argument-snapshot">
+      {nodes.map((node) => (
+        <li key={node.id}>
+          <strong>{argumentNames[node.kind]}</strong>
+          {node.text && <p>{node.text}</p>}
+          {node.children.length > 0 && <ArgumentSnapshot nodes={node.children} />}
+        </li>
+      ))}
+    </ol>
+  )
+}
 
 function Review({ attempt, question }: { attempt: Attempt; question?: Question }) {
   return (
@@ -77,16 +111,33 @@ function Review({ attempt, question }: { attempt: Attempt; question?: Question }
               {question?.choices?.find((c) => c.id === attempt.draft.choiceId)?.text}
             </p>
           )}
-          {attempt.draft.blocks.map((block, index) => (
-            <p key={block.id}>
-              <b>
-                {index + 1}. {block.label}
-              </b>
-              <br />
-              {block.text}
-            </p>
-          ))}
-          {attempt.draft.text && <p>{attempt.draft.text}</p>}
+          {!attempt.draft.argument &&
+            attempt.draft.blocks.map((block, index) => (
+              <p key={block.id}>
+                <b>
+                  {index + 1}. {block.label}
+                </b>
+                <br />
+                {block.text}
+              </p>
+            ))}
+          {attempt.draft.argument && (
+            <details className="submitted-structure">
+              <summary>查看提交时的模块结构</summary>
+              <ArgumentSnapshot nodes={attempt.draft.argument.roots} />
+              <p className="muted">结构生成预览（最终正文保留在下方）</p>
+              <p className="argument-prose">{generateArgumentText(attempt.draft.argument.roots)}</p>
+            </details>
+          )}
+          {attempt.draft.text && <p className="argument-prose">{attempt.draft.text}</p>}
+          {question?.subject === 'math' && attempt.draft.math && (
+            <MathWorkbench
+              key={attempt.id}
+              value={attempt.draft.math}
+              onChange={() => {}}
+              disabled
+            />
+          )}
           {question?.kind === 'geography' && (
             <GeographyWorkbench drawing={attempt.draft.drawing} onChange={() => {}} disabled />
           )}
@@ -147,7 +198,9 @@ export default function App() {
   }, [])
 
   const filtered = questions.filter((q) => {
-    if (view === 'politics' && q.kind !== 'politics') return false
+    if (view === 'math' && q.subject !== 'math') return false
+    if (view === 'politics' && !['politics', 'history', 'chinese', 'geography'].includes(q.kind))
+      return false
     if (view === 'geography' && q.kind !== 'geography') return false
     if (subject !== 'all' && q.subject !== subject) return false
     return `${q.title} ${q.tags.join(' ')} ${q.source}`.toLowerCase().includes(query.toLowerCase())
@@ -261,7 +314,7 @@ export default function App() {
         ? Boolean(draft.text.trim())
         : Boolean(
             draft.text.trim() ||
-            draft.blocks.some((b) => b.text.trim()) ||
+            (!draft.argument && draft.blocks.some((b) => b.text.trim())) ||
             draft.drawing.points.length,
           )
   const focusedHistory = state.attempts.find((a) => a.id === historyId)
@@ -359,13 +412,15 @@ export default function App() {
                   <h1>
                     {view === 'practice'
                       ? '今天，理解得更深一点。'
-                      : view === 'politics'
-                        ? '让每个观点，有理有据。'
-                        : view === 'geography'
-                          ? '在坐标里，发现联系。'
-                          : view === 'history'
-                            ? '每一次练习，都有迹可循。'
-                            : '为你的学习，接入更多可能。'}
+                      : view === 'math'
+                        ? '把公式，变成可探索的图像。'
+                        : view === 'politics'
+                          ? '让每个观点，有理有据。'
+                          : view === 'geography'
+                            ? '在坐标里，发现联系。'
+                            : view === 'history'
+                              ? '每一次练习，都有迹可循。'
+                              : '为你的学习，接入更多可能。'}
                   </h1>
                   <p>
                     {view === 'history'
@@ -412,7 +467,20 @@ export default function App() {
                 </div>
               </div>
 
-              {(view === 'practice' || view === 'politics' || view === 'geography') && (
+              <ActivityHeatmap
+                attempts={state.attempts}
+                questions={questions}
+                onSelectAttempt={(id) => {
+                  if (busy) return
+                  setHistoryId(id)
+                  changeView('history')
+                }}
+              />
+
+              {(view === 'practice' ||
+                view === 'math' ||
+                view === 'politics' ||
+                view === 'geography') && (
                 <div className="study-layout">
                   <section className="question-library card" aria-label="题目列表">
                     <div className="library-heading">
@@ -434,7 +502,13 @@ export default function App() {
                       {[
                         ['all', '全部'],
                         ...subjects
-                          .filter((id) => view === 'practice' || id === view)
+                          .filter(
+                            (id) =>
+                              view === 'practice' ||
+                              (view === 'politics'
+                                ? ['politics', 'history', 'chinese', 'geography'].includes(id)
+                                : id === view),
+                          )
                           .map((id) => [id, id === 'politics' ? '政治' : subjectLabel[id]]),
                       ].map(([id, label]) => (
                         <button
@@ -575,12 +649,14 @@ export default function App() {
                                   </div>
                                 </>
                               )}
-                              {selected.kind === 'politics' && (
-                                <PoliticsComposer
+                              {['politics', 'history', 'chinese', 'geography'].includes(
+                                selected.kind,
+                              ) && (
+                                <HumanitiesComposer
                                   key={selected.id}
-                                  availableBlocks={selected.blocks ?? []}
-                                  blocks={draft.blocks}
-                                  onChange={(blocks) => updateDraft({ ...draft, blocks })}
+                                  subject={selected.subject}
+                                  draft={draft}
+                                  onChange={updateDraft}
                                   disabled={busy}
                                 />
                               )}
@@ -589,6 +665,14 @@ export default function App() {
                                   key={selected.id}
                                   drawing={draft.drawing}
                                   onChange={(drawing) => updateDraft({ ...draft, drawing })}
+                                  disabled={busy}
+                                />
+                              )}
+                              {selected.subject === 'math' && (
+                                <MathWorkbench
+                                  key={selected.id}
+                                  value={draft.math ?? emptyMathState()}
+                                  onChange={(math) => updateDraft({ ...draft, math })}
                                   disabled={busy}
                                 />
                               )}
@@ -717,8 +801,9 @@ export default function App() {
                                       />
                                       <span>
                                         我同意本次将当前题目（含来源、参考答案 /
-                                        解析和评分要点）、我的答案（选项、文字、模块和绘图坐标 /
-                                        连线）及上方学习范围发送至
+                                        解析和评分要点）、我的答案（选项、最终正文、模块文字与嵌套论证结构、绘图坐标
+                                        / 连线、数学函数表达式 / 参数 /
+                                        测量选点）及上方学习范围发送至
                                         DeepSeek（https://api.deepseek.com）进行审阅，可能产生 API
                                         费用。每次提交均需重新确认。
                                       </span>
@@ -870,7 +955,7 @@ export default function App() {
               )}
               <footer className="page-footer">
                 <span>
-                  ExamCraft <b>0.1</b>
+                  ExamCraft <b>0.2.0</b>
                 </span>
                 <span>学会一道题，比刷过一道题更重要。</span>
                 <span>记录保存在本机 · 云端审阅需逐次确认</span>

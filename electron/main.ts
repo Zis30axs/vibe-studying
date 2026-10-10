@@ -8,6 +8,7 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron'
 import { readFile } from 'node:fs/promises'
+import { mkdirSync } from 'node:fs'
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { LocalQuestionBank } from '../src/adapters/local-question-bank'
 import { DeepSeekAgent } from '../src/adapters/deepseek-agent'
@@ -28,10 +29,15 @@ try {
     'DeepSeek 模型配置无效，请检查 EXAMCRAFT_DEEPSEEK_MODEL 后重启；本地模式仍可使用。'
 }
 app.setName('ExamCraft')
-if (!app.isPackaged && process.env.EXAMCRAFT_USER_DATA) {
-  if (!isAbsolute(process.env.EXAMCRAFT_USER_DATA))
-    throw new Error('EXAMCRAFT_USER_DATA must be an absolute path')
-  app.setPath('userData', process.env.EXAMCRAFT_USER_DATA)
+// An explicit CLI profile works in portable builds too, including isolated release smoke tests.
+// Ambient EXAMCRAFT_USER_DATA is still honored only in development.
+const userDataOverride =
+  app.commandLine.getSwitchValue('user-data-dir') ||
+  (!app.isPackaged ? process.env.EXAMCRAFT_USER_DATA : undefined)
+if (userDataOverride) {
+  if (!isAbsolute(userDataOverride)) throw new Error('User data directory must be an absolute path')
+  mkdirSync(userDataOverride, { recursive: true })
+  app.setPath('userData', userDataOverride)
 }
 protocol.registerSchemesAsPrivileged([
   {

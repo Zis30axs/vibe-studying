@@ -1,6 +1,21 @@
 import { z } from 'zod'
+import { parseExpression } from './math'
 import { subjects } from '../shared/subjects'
-import type { AnswerDraft, Question, StudyState } from '../shared/types'
+import type {
+  AnswerDraft,
+  ArgumentDocument,
+  ArgumentNode,
+  Question,
+  StudyState,
+} from '../shared/types'
+import {
+  argumentKinds,
+  assertArgumentRoots,
+  finalAnswerText,
+  MAX_ARGUMENT_DEPTH,
+  MAX_ARGUMENT_NODES,
+  MAX_ARGUMENT_TEXT_LENGTH,
+} from './argument'
 
 export const idSchema = z
   .string()
@@ -104,14 +119,87 @@ export const drawingSchema = z
       fail('坐标超出当前坐标系范围')
   })
 
-export const draftSchema = z
+export const mathWorkbenchSchema = z
   .strictObject({
-    choiceId: idSchema.optional(),
-    text: z.string().max(20000),
-    blocks: z.array(blockSchema.extend({ label: z.string().max(120) })).max(30),
-    drawing: drawingSchema,
+    drawing: drawingSchema.refine(
+      (drawing) => drawing.mode === 'cartesian',
+      '数学工具需要直角坐标系',
+    ),
+    expression: z
+      .string()
+      .max(160)
+      .refine((expression) => {
+        try {
+          if (!expression.trim()) return true
+          parseExpression(expression)
+          return true
+        } catch {
+          return false
+        }
+      }, '函数表达式无效，请使用支持的符号和显式乘号 *'),
+    parameters: z.strictObject({
+      a: z.number().finite().min(-10).max(10),
+      b: z.number().finite().min(-10).max(10),
+      c: z.number().finite().min(-10).max(10),
+    }),
+    measurement: z.array(idSchema).max(3),
   })
+  .superRefine((math, ctx) => {
+    const ids = new Set(math.drawing.points.map((point) => point.id))
+    if (
+      new Set(math.measurement).size !== math.measurement.length ||
+      math.measurement.some((id) => !ids.has(id))
+    )
+      ctx.addIssue({ code: 'custom', path: ['measurement'], message: '测量必须选择不同的已有点' })
+  })
+
+// Bounded shape remains representable as an MCP JSON Schema. The in-process schema
+// separately guards object identity BEFORE Zod recursively traverses the children.
+function boundedArgumentNodeSchema(depth: number): z.ZodType<ArgumentNode> {
+  return z.strictObject({
+    id: idSchema,
+    kind: z.enum(argumentKinds),
+    text: z.string().max(MAX_ARGUMENT_TEXT_LENGTH),
+    children:
+      depth === MAX_ARGUMENT_DEPTH
+        ? z.array(z.never()).max(0)
+        : z.array(boundedArgumentNodeSchema(depth + 1)).max(MAX_ARGUMENT_NODES),
+  })
+}
+const argumentWireSchema = z.strictObject({
+  version: z.literal(1),
+  roots: z.array(boundedArgumentNodeSchema(1)).max(MAX_ARGUMENT_NODES),
+})
+export const argumentSchema = z.preprocess((input, ctx) => {
+  try {
+    if (!input || typeof input !== 'object' || Array.isArray(input))
+      throw new Error('论证结构格式无效')
+    assertArgumentRoots((input as Record<string, unknown>).roots)
+  } catch (error) {
+    ctx.addIssue({
+      code: 'custom',
+      message: error instanceof Error ? error.message : '论证结构无效',
+    })
+    return z.NEVER
+  }
+  return input
+}, argumentWireSchema) satisfies z.ZodType<ArgumentDocument>
+
+const draftObjectSchema = z.strictObject({
+  choiceId: idSchema.optional(),
+  math: mathWorkbenchSchema.optional(),
+  text: z.string().max(20000),
+  blocks: z.array(blockSchema.extend({ label: z.string().max(120) })).max(30),
+  drawing: drawingSchema,
+})
+export const draftSchema = draftObjectSchema
+  .extend({ argument: argumentSchema.optional() })
   .refine((draft) => uniqueIds(draft.blocks), '已选模块 ID 重复') satisfies z.ZodType<AnswerDraft>
+
+/** JSON transport has no object aliases. Always follow this wire schema with validateAnswer. */
+export const draftWireSchema = draftObjectSchema
+  .extend({ argument: argumentWireSchema.optional() })
+  .refine((draft) => uniqueIds(draft.blocks), '已选模块 ID 重复')
 
 export const reviewSchema = z
   .strictObject({
@@ -177,14 +265,14 @@ export function validateAnswer(
   if (
     submitting &&
     question.kind !== 'choice' &&
-    !draft.text.trim() &&
-    !draft.blocks.some((block) => block.text.trim()) &&
+    !finalAnswerText(draft).trim() &&
     !draft.drawing.points.length
   )
     throw new Error('请先填写答案或绘图')
   if (
     submitting &&
-    ['chinese', 'math', 'english', 'history'].includes(question.kind) &&
+    (['chinese', 'math', 'english', 'history'].includes(question.kind) ||
+      (draft.argument && question.kind !== 'choice' && question.kind !== 'geography')) &&
     !draft.text.trim()
   )
     throw new Error('请先填写文字答案')

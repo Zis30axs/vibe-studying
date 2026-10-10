@@ -3,7 +3,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { AgentAdapter, QuestionBankAdapter } from '../src/adapters/contracts'
 import { matchesScope } from '../src/adapters/local-question-bank'
 import {
-  draftSchema,
+  draftWireSchema,
   idSchema,
   scopeSchema,
   validateAnswer,
@@ -69,8 +69,8 @@ export function createExamCraftMcpServer(
     {
       title: '本地规则评阅',
       description:
-        '选择题精确对照答案；主观题仅做关键词匹配，不理解语义或绘图。评阅不保存桌面作答记录。',
-      inputSchema: { questionId: idSchema, draft: draftSchema },
+        '选择题精确对照答案；主观题仅做关键词匹配，不理解语义、嵌套或绘图。含 argument 的作答只检查最终 text；旧版 blocks 仍支持。评阅不保存桌面作答记录。',
+      inputSchema: { questionId: idSchema, draft: draftWireSchema },
       annotations,
     },
     async ({ questionId, draft }) =>
