@@ -22,14 +22,29 @@ async function call(client: Client, name: string, args: Record<string, unknown>)
   return JSON.parse(text.text) as unknown
 }
 
+function requireReferenceQuestion(value: unknown): Question {
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    !Object.prototype.hasOwnProperty.call(value, 'explanation')
+  ) {
+    throw new Error(
+      'MCP 缺少参考访问权限 (reference access): McpQuestionBankAdapter requires a trusted server started with --reference-access full',
+    )
+  }
+  return questionSchema.parse(value)
+}
+
 /** The host owns the connected, trusted Client. Adapters never accept or launch commands. */
 export class McpQuestionBankAdapter implements QuestionBankAdapter {
   readonly name = 'MCP 题库适配器'
   constructor(private readonly client: Client) {}
   async list(scope: QuestionScope = {}): Promise<Question[]> {
     const response = await call(this.client, 'list_questions', scopeSchema.parse(scope))
-    return z.strictObject({ questions: z.array(questionSchema).max(1000) }).parse(response)
-      .questions
+    return z
+      .strictObject({ questions: z.array(z.unknown()).max(1000) })
+      .parse(response)
+      .questions.map(requireReferenceQuestion)
   }
   async get(questionId: string, scope: QuestionScope = {}): Promise<Question> {
     // Locally enforce any additional caller scope as well as the server's scope.
@@ -39,22 +54,21 @@ export class McpQuestionBankAdapter implements QuestionBankAdapter {
       !(await this.list(scope)).some((question) => question.id === id)
     )
       throw new Error('题目不在允许范围内')
-    return z
-      .strictObject({ question: questionSchema })
-      .parse(await call(this.client, 'get_question', { questionId: id })).question
+    const response = z
+      .strictObject({ question: z.unknown() })
+      .parse(await call(this.client, 'get_question', { questionId: id }))
+    return requireReferenceQuestion(response.question)
   }
 }
 export class McpAgentAdapter implements AgentAdapter {
   readonly name = 'MCP 评阅适配器'
   constructor(private readonly client: Client) {}
   async review(question: Question, draft: AnswerDraft): Promise<Review> {
-    return z
-      .strictObject({ review: reviewSchema })
-      .parse(
-        await call(this.client, 'review_answer', {
-          questionId: idSchema.parse(question.id),
-          draft: draftSchema.parse(draft),
-        }),
-      ).review
+    return z.strictObject({ review: reviewSchema }).parse(
+      await call(this.client, 'review_answer', {
+        questionId: idSchema.parse(question.id),
+        draft: draftSchema.parse(draft),
+      }),
+    ).review
   }
 }

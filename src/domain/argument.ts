@@ -1,5 +1,7 @@
 import type {
   AnswerDraft,
+  ArgumentCanvas,
+  ArgumentPosition,
   ArgumentContainerKind,
   ArgumentDocument,
   ArgumentKind,
@@ -116,7 +118,12 @@ export function argumentFromDraft(draft: AnswerDraft): ArgumentDocument {
   if (draft.argument) {
     if (draft.argument.version !== 1) throw new Error('论证模块版本不受支持')
     assertArgumentRoots(draft.argument.roots)
-    return { version: 1, roots: cloneRoots(draft.argument.roots) }
+    return {
+      version: 1,
+      roots: cloneRoots(draft.argument.roots),
+      ...(draft.argument.canvas ? { canvas: structuredClone(draft.argument.canvas) } : {}),
+      ...(draft.argument.revisions ? { revisions: structuredClone(draft.argument.revisions) } : {}),
+    }
   }
   const roots: ArgumentNode[] = draft.blocks.map((block) => ({
     id: block.id,
@@ -207,4 +214,62 @@ export function insertArgumentNode(
   target.splice(index, 0, cloneRoots([node])[0])
   assertArgumentRoots(next)
   return next
+}
+
+/** Flat visual projection; parentage and reading order remain in roots only. */
+export function flattenArgument(
+  roots: ArgumentNode[],
+): { node: ArgumentNode; parentId: string | null; index: number; path: string }[] {
+  assertArgumentRoots(roots)
+  const result: { node: ArgumentNode; parentId: string | null; index: number; path: string }[] = []
+  function visit(nodes: ArgumentNode[], parentId: string | null, prefix: string) {
+    nodes.forEach((node, index) => {
+      const path = `${prefix}${index + 1}`
+      result.push({ node, parentId, index, path })
+      visit(node.children, node.id, `${path}.`)
+    })
+  }
+  visit(roots, null, '')
+  return result
+}
+
+export function boundArgumentCoordinate(value: number): number {
+  if (!Number.isFinite(value)) throw new Error('画布坐标必须为有限数字')
+  return Math.max(-100000, Math.min(100000, value))
+}
+
+/** Supply positions for old/new nodes, retain existing positions, and prune removed nodes. */
+export function argumentCanvas(document: ArgumentDocument): ArgumentCanvas {
+  const positions: Record<string, ArgumentPosition> = {}
+  flattenArgument(document.roots).forEach(({ node }, index) => {
+    const saved = document.canvas?.positions[node.id]
+    positions[node.id] = saved
+      ? { x: boundArgumentCoordinate(saved.x), y: boundArgumentCoordinate(saved.y) }
+      : { x: 24 + (index % 3) * 260, y: 24 + Math.floor(index / 3) * 180 }
+  })
+  const viewport = document.canvas?.viewport ?? { x: 0, y: 0, zoom: 1 }
+  if (!Number.isFinite(viewport.zoom)) throw new Error('画布缩放无效')
+  return {
+    positions,
+    viewport: {
+      x: boundArgumentCoordinate(viewport.x),
+      y: boundArgumentCoordinate(viewport.y),
+      zoom: Math.max(0.15, Math.min(2, viewport.zoom)),
+    },
+  }
+}
+
+/** Moving visually must never reorder, reparent, or regenerate the logical structure. */
+export function positionArgumentNode(
+  document: ArgumentDocument,
+  id: string,
+  position: ArgumentPosition,
+): ArgumentDocument {
+  const canvas = argumentCanvas(document)
+  if (!Object.hasOwn(canvas.positions, id)) throw new Error('找不到要移动的模块')
+  canvas.positions[id] = {
+    x: boundArgumentCoordinate(position.x),
+    y: boundArgumentCoordinate(position.y),
+  }
+  return { ...document, roots: cloneRoots(document.roots), canvas }
 }

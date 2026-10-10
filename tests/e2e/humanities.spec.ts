@@ -82,8 +82,7 @@ async function structure(page: Page) {
     elements.map((element) => ({
       id: element.getAttribute('data-block-id'),
       kind: element.getAttribute('data-block-kind'),
-      parent:
-        element.parentElement?.closest('[data-block-id]')?.getAttribute('data-block-id') ?? null,
+      parent: element.getAttribute('data-parent-id') || null,
     })),
   )
 }
@@ -98,52 +97,41 @@ async function activate(control: Locator) {
   await control.press('Enter')
 }
 
-async function addWithKeyboard(page: Page, kind: string, target = 'drop-root') {
+async function selectNode(page: Page, id: string) {
+  const outline = page.locator('.free-outline')
+  if ((await outline.getAttribute('open')) === null) await outline.locator('summary').click()
+  await activate(page.getByTestId(`select-${id}`))
+}
+
+async function addWithKeyboard(page: Page, kind: string, target?: string) {
   const before = await nodeIds(page)
   await activate(page.getByTestId(`palette-${kind}`))
-  await activate(page.getByTestId(target))
+  await activate(page.getByTestId('place-center'))
   await expect(nodes(page)).toHaveCount(before.length + 1)
-  return (await nodeIds(page)).find((id) => !before.includes(id))!
+  await page.getByRole('button', { name: '适应全部', exact: true }).click()
+  const id = (await nodeIds(page)).find((id) => !before.includes(id))!
+  if (target?.startsWith('drop-inside-'))
+    await page.getByTestId('argument-parent').selectOption(target.slice('drop-inside-'.length))
+  return id
 }
 
-async function addWithDrag(page: Page, kind: string, target = 'drop-root') {
+async function addWithDrag(page: Page, kind: string, x: number, y: number) {
   const before = await nodeIds(page)
-  await nativeDrag(page, page.getByTestId(`palette-${kind}`), page.getByTestId(target))
+  await page.getByTestId(`palette-${kind}`).dragTo(canvas(page), { targetPosition: { x, y } })
   await expect(nodes(page)).toHaveCount(before.length + 1)
   return (await nodeIds(page)).find((id) => !before.includes(id))!
 }
 
-async function moveWithDrag(page: Page, id: string, target: string) {
-  await nativeDrag(page, page.getByTestId(`drag-${id}`), page.getByTestId(target))
-}
-
-async function nativeDrag(page: Page, source: Locator, target: Locator) {
-  // Start Chromium's native drag before scrolling the destination into view.
-  // dragTo scrolls after mouse-down but before its first pressed movement; when
-  // that moves the source away, Chromium can cancel the drag before dragstart.
-  // Only real pointer input is used here, with no injected events or model calls.
-  await source.hover()
-  const start = await source.boundingBox()
-  if (!start) throw new Error('Drag source has no visible bounds')
+async function dragNode(page: Page, id: string, dx: number, dy: number) {
+  await selectNode(page, id)
+  const handle = page.getByTestId(`drag-${id}`)
+  await handle.scrollIntoViewIfNeeded()
+  const box = await handle.boundingBox()
+  if (!box) throw new Error('Missing drag handle')
+  await page.mouse.move(box.x + 20, box.y + box.height / 2)
   await page.mouse.down()
-  try {
-    await page.mouse.move(start.x + start.width / 2 + 10, start.y + start.height / 2, {
-      steps: 5,
-    })
-    await expect(source).toHaveAttribute('aria-pressed', 'true')
-    await expect(target).toBeEnabled()
-    await target.scrollIntoViewIfNeeded()
-    const end = await target.boundingBox()
-    if (!end) throw new Error('Drop socket has no visible bounds')
-    const x = end.x + end.width / 2
-    const y = end.y + end.height / 2
-    await page.mouse.move(x, y, { steps: 12 })
-    // The first arrival may emit dragenter; another native move emits dragover.
-    await page.mouse.move(x, y)
-    await expect(target).toHaveClass(/\bis-over\b/)
-  } finally {
-    await page.mouse.up()
-  }
+  await page.mouse.move(box.x + 20 + dx, box.y + box.height / 2 + dy, { steps: 10 })
+  await page.mouse.up()
 }
 
 async function selectSubject(page: Page, subject: string, title: string) {
@@ -152,76 +140,72 @@ async function selectSubject(page: Page, subject: string, title: string) {
   await expect(page.getByTestId('humanities-composer')).toBeVisible()
 }
 
-test('real palette drags create independent blocks, reorder and nest without allowing cycles', async () => {
+test('real palette drags and pointer moves freely without changing logical order; connections reject cycles', async () => {
   const page = await launch()
-  const first = await addWithDrag(page, 'principle')
-  const second = await addWithDrag(page, 'principle')
+  const first = await addWithDrag(page, 'principle', 31, 27)
+  const second = await addWithDrag(page, 'principle', 290, 101)
   await page.getByTestId(`text-${first}`).fill('第一条原理，只编辑这一份。')
   await expect(page.getByTestId(`text-${second}`)).toHaveValue('')
   await page.getByTestId(`text-${second}`).fill('第二条原理，独立保留。')
-  await moveWithDrag(page, second, `drop-before-${first}`)
+  const original = await structure(page)
+  const x = Number(await page.getByTestId(`block-${first}`).getAttribute('data-x'))
+  await dragNode(page, first, 83, 41)
+  await expect
+    .poll(async () => Number(await page.getByTestId(`block-${first}`).getAttribute('data-x')))
+    .toBeCloseTo(x + 83, 0)
+  await expect.poll(() => structure(page)).toEqual(original)
+  await expect(page.getByTestId('argument-preview')).toHaveValue(/第一条原理[\s\S]*第二条原理/)
+  await selectNode(page, second)
+  await activate(page.getByTestId(`move-up-${second}`))
   await expect.poll(() => rootIds(page)).toEqual([second, first])
-
-  const cause = await addWithDrag(page, 'cause')
-  const point = await addWithDrag(page, 'point', `drop-inside-${cause}`)
-  await moveWithDrag(page, first, `drop-inside-${point}`)
+  const cause = await addWithKeyboard(page, 'cause')
+  const point = await addWithKeyboard(page, 'point', `drop-inside-${cause}`)
+  await selectNode(page, first)
+  await page.getByTestId('argument-parent').selectOption(point)
   await expect.poll(() => rootIds(page)).toEqual([second, cause])
-  await expect
-    .poll(async () => (await structure(page)).find((node) => node.id === point)?.parent)
-    .toBe(cause)
-  await expect
-    .poll(async () => (await structure(page)).find((node) => node.id === first)?.parent)
-    .toBe(point)
-  await expect(page.getByTestId('argument-preview')).toHaveValue(
-    /第二条原理，独立保留。[\s\S]*第一条原理，只编辑这一份。/,
+  await selectNode(page, cause)
+  await expect(page.getByTestId('argument-parent').locator(`option[value="${cause}"]`)).toHaveCount(
+    0,
   )
-
-  const beforeInvalidMove = await structure(page)
-  await moveWithDrag(page, cause, `drop-inside-${cause}`)
-  await expect(page.getByTestId('humanities-composer').getByRole('alert')).toHaveText(
-    '不能把模块移入自身或其子模块',
+  await expect(page.getByTestId('argument-parent').locator(`option[value="${point}"]`)).toHaveCount(
+    0,
   )
-  await expect.poll(() => structure(page)).toEqual(beforeInvalidMove)
-  await moveWithDrag(page, cause, `drop-inside-${point}`)
-  await expect(page.getByTestId('humanities-composer').getByRole('alert')).toHaveText(
-    '不能把模块移入自身或其子模块',
-  )
-  await expect.poll(() => structure(page)).toEqual(beforeInvalidMove)
   await expect(nodes(page)).toHaveCount(4)
-  await expect(page.getByTestId(`text-${first}`)).toHaveValue('第一条原理，只编辑这一份。')
   await expect(page.locator('#answer-text')).toHaveValue('')
 })
 
-test('keyboard controls reorder, nest, unnest and restore a removed subtree with undo', async () => {
+test('keyboard movement, explicit nesting and undo preserve independent content and placement', async () => {
   const page = await launch()
   const principle = await addWithKeyboard(page, 'principle')
   const material = await addWithKeyboard(page, 'material')
   const point = await addWithKeyboard(page, 'point')
   await page.getByTestId(`text-${principle}`).fill('实践是认识的来源。')
   await page.getByTestId(`text-${material}`).fill('居民议事会和实地走访。')
-
+  await selectNode(page, material)
+  const block = page.getByTestId(`block-${material}`)
+  const x = Number(await block.getAttribute('data-x'))
+  await page.getByTestId(`drag-${material}`).focus()
+  await page.getByTestId(`drag-${material}`).press('ArrowRight')
+  await expect(block).toHaveAttribute('data-x', String(x + 10))
+  await activate(page.getByTestId('undo-argument'))
+  await expect(block).toHaveAttribute('data-x', String(x))
+  await selectNode(page, material)
   await activate(page.getByTestId(`move-up-${material}`))
   await expect.poll(() => rootIds(page)).toEqual([material, principle, point])
   await activate(page.getByTestId(`move-down-${material}`))
-  await expect.poll(() => rootIds(page)).toEqual([principle, material, point])
-  await activate(page.getByTestId(`select-${material}`))
-  await activate(page.getByTestId(`drop-inside-${point}`))
-  await expect
-    .poll(async () => (await structure(page)).find((node) => node.id === material)?.parent)
-    .toBe(point)
-  await activate(page.getByTestId(`move-out-${material}`))
-  await expect
-    .poll(async () => (await structure(page)).find((node) => node.id === material)?.parent)
-    .toBeNull()
-  await activate(page.getByTestId(`select-${material}`))
-  await activate(page.getByTestId(`drop-inside-${point}`))
-
+  await page.getByTestId('argument-parent').selectOption(point)
+  await expect(block).toHaveAttribute('data-parent-id', point)
+  await page.getByTestId('argument-parent').selectOption('')
+  await expect(block).toHaveAttribute('data-parent-id', '')
+  await page.getByTestId('argument-parent').selectOption(point)
   const beforeRemoval = await structure(page)
+  const beforePosition = await block.getAttribute('data-x')
+  await selectNode(page, point)
   await activate(page.getByTestId(`remove-${point}`))
   await expect(nodes(page)).toHaveCount(1)
-  await expect(page.getByTestId('argument-preview')).not.toHaveValue(/居民议事会/)
-  await activate(page.getByTestId('undo-remove'))
+  await activate(page.getByTestId('undo-argument'))
   await expect.poll(() => structure(page)).toEqual(beforeRemoval)
+  await expect(block).toHaveAttribute('data-x', beforePosition!)
   await expect(page.getByTestId(`text-${material}`)).toHaveValue('居民议事会和实地走访。')
   await expect(page.getByRole('alert')).toHaveCount(0)
 })
@@ -285,9 +269,11 @@ test('four humanities subjects offer structure templates, isolate drafts and ret
       await drawing.getByRole('button', { name: '添加点', exact: true }).click()
       await expect(drawing.getByText('1 个点 · 0 条线', { exact: true })).toBeVisible()
     }
+    await page.locator('.free-template > summary').click()
     await page.getByTestId('argument-template').selectOption(item.template)
     await page.getByTestId('apply-template').click()
     await expect(nodes(page)).toHaveCount(item.count)
+    await page.getByRole('button', { name: '适应全部', exact: true }).click()
     const ids = await nodeIds(page)
     savedNodes.set(item.subject, ids)
     await page.getByTestId(`text-${ids.at(-1)}`).fill(`${item.subject}的独立草稿。`)
@@ -308,6 +294,7 @@ test('four humanities subjects offer structure templates, isolate drafts and ret
   }
   // Applying another template appends a separate structure without replacing work.
   await selectSubject(page, '政治', '让社区更新回应居民需求')
+  await page.locator('.free-template > summary').click()
   await page.getByTestId('argument-template').selectOption('cause')
   await page.getByTestId('apply-template').click()
   await expect(nodes(page)).toHaveCount(9)
@@ -329,6 +316,10 @@ test('nested drafts and manual text survive restart while submission history sta
   await page.getByTestId(`text-${principle}`).fill('实践是认识的来源。')
   await page.getByTestId(`text-${material}`).fill(submittedMaterial)
   await page.locator('#answer-text').fill(finalText)
+  await selectNode(page, material)
+  await page.getByTestId(`drag-${material}`).focus()
+  await page.getByTestId(`drag-${material}`).press('ArrowRight')
+  const savedX = await page.getByTestId(`block-${material}`).getAttribute('data-x')
   const submittedStructure = await structure(page)
   await page.getByRole('button', { name: '提交并审阅', exact: true }).click()
   await expect(
@@ -344,6 +335,7 @@ test('nested drafts and manual text survive restart while submission history sta
   app = undefined
   page = await launch()
   await expect.poll(() => structure(page)).toEqual(submittedStructure)
+  await expect(page.getByTestId(`block-${material}`)).toHaveAttribute('data-x', savedX!)
   await expect(page.getByTestId(`text-${material}`)).toHaveValue(laterMaterial)
   await expect(page.getByTestId(`text-${principle}`)).toHaveValue('实践是认识的来源。')
   await expect(page.locator('#answer-text')).toHaveValue(finalText)

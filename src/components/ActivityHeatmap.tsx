@@ -2,12 +2,12 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { ACTIVITY_WEEKS, buildActivityDays } from '../domain/activity'
 import { subjectLabel } from '../shared/subjects'
-import type { Attempt, Question } from '../shared/types'
+import type { Attempt, StudentQuestion } from '../shared/types'
 import './activity.css'
 
 interface Props {
   attempts: Attempt[]
-  questions: Question[]
+  questions: StudentQuestion[]
   onSelectAttempt: (id: string) => void
 }
 

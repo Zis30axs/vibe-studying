@@ -31,6 +31,9 @@ for (const path of [
   'dist/index.html',
   'dist-electron/main.cjs',
   'dist-electron/preload.cjs',
+  'dist-electron/knowledge-pdf-worker.cjs',
+  'dist-electron/node_modules/pdfjs-dist/legacy/build/pdf.mjs',
+  'dist-electron/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
   'dist-mcp/server.cjs',
 ]) {
   if (!(await stat(path)).isFile()) throw new Error(`Build output missing: ${path}`)
@@ -79,7 +82,15 @@ const notices = [
 ]
 for (const [path, entry] of Object.entries(lock.packages).sort(([a], [b]) => a.localeCompare(b))) {
   if (!path || entry.dev) continue
-  const installed = JSON.parse(await readFile(join(path, 'package.json'), 'utf8'))
+  let installed
+  try {
+    installed = JSON.parse(await readFile(join(path, 'package.json'), 'utf8'))
+  } catch (error) {
+    // npm records native bindings for every OS in the lock; only installed
+    // optional dependencies ship. Missing required dependencies still fail.
+    if (entry.optional && error.code === 'ENOENT') continue
+    throw error
+  }
   if (installed.version !== entry.version)
     throw new Error(`Dependency differs from lockfile: ${path}`)
   notices.push(

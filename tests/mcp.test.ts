@@ -8,6 +8,11 @@ import { join, resolve } from 'node:path'
 import { McpAgentAdapter, McpQuestionBankAdapter } from '../src/adapters/mcp-adapters'
 import { emptyDraft, type ArgumentNode } from '../src/shared/types'
 
+function structured(response: Record<string, unknown>): Record<string, unknown> {
+  expect(response.structuredContent).toBeTruthy()
+  return response.structuredContent as Record<string, unknown>
+}
+
 describe('real MCP stdio client/server', () => {
   let directory: string
   let client: Client
@@ -29,6 +34,8 @@ describe('real MCP stdio client/server', () => {
         command: process.execPath,
         args: [
           output,
+          '--reference-access',
+          'full',
           '--subject',
           'geography',
           '--tag',
@@ -55,6 +62,8 @@ describe('real MCP stdio client/server', () => {
     const questions = await bank.list()
     expect(questions.map((question) => question.id)).toEqual(['geo-choice-1'])
     expect((await bank.get('geo-choice-1')).title).toBe('经纬网中的方向')
+    expect((await bank.get('geo-choice-1')).correctAnswer).toBe('C')
+    expect((await bank.get('geo-choice-1')).explanation).toBeTruthy()
   })
   it('cannot widen scope through list, get, or review', async () => {
     expect(await bank.list({ subject: 'politics' })).toEqual([])
@@ -103,6 +112,87 @@ describe('new subjects over real MCP stdio', () => {
   afterAll(async () => {
     if (directory) await rm(directory, { recursive: true, force: true })
   })
+  it('defaults to student projection and tool arguments cannot grant reference access', async () => {
+    const client = new Client({ name: 'student-access-test', version: '1.0.0' })
+    try {
+      await client.connect(
+        new StdioClientTransport({
+          command: process.execPath,
+          args: [output, '--subject', 'geography'],
+          stderr: 'pipe',
+        }),
+      )
+      const listed = await client.callTool({ name: 'list_questions', arguments: {} })
+      expect(listed.isError).not.toBe(true)
+      const questions = structured(listed).questions as Record<string, unknown>[]
+      expect(questions.length).toBeGreaterThan(0)
+      const publicKeys = [
+        'id',
+        'subject',
+        'kind',
+        'title',
+        'prompt',
+        'source',
+        'tags',
+        'maxScore',
+        'choices',
+      ]
+      for (const question of questions) {
+        expect(Object.keys(question).every((key) => publicKeys.includes(key))).toBe(true)
+        for (const key of ['explanation', 'rubric', 'correctAnswer', 'blocks'])
+          expect(question).not.toHaveProperty(key)
+        const got = await client.callTool({
+          name: 'get_question',
+          arguments: { questionId: question.id },
+        })
+        expect(structured(got).question).toEqual(question)
+      }
+      for (const name of ['list_questions', 'get_question']) {
+        const attempted = await client.callTool({
+          name,
+          arguments: {
+            ...(name === 'get_question' ? { questionId: questions[0].id } : {}),
+            referenceAccess: 'full',
+          },
+        })
+        // SDK may reject unknown keys or strip them; neither path grants access.
+        if (!attempted.isError) {
+          const result = structured(attempted)
+          const returned =
+            name === 'get_question' ? [result.question] : (result.questions as unknown[])
+          for (const question of returned)
+            for (const key of ['explanation', 'rubric', 'correctAnswer', 'blocks'])
+              expect(question).not.toHaveProperty(key)
+        }
+      }
+      const outside = await client.callTool({
+        name: 'get_question',
+        arguments: { questionId: 'pol-choice-1' },
+      })
+      expect(outside.isError).toBe(true)
+      const narrowed = await client.callTool({
+        name: 'list_questions',
+        arguments: { subject: 'politics' },
+      })
+      expect(structured(narrowed).questions).toEqual([])
+      const adapter = new McpQuestionBankAdapter(client)
+      await expect(adapter.list()).rejects.toThrow('reference access')
+      await expect(adapter.get('geo-choice-1')).rejects.toThrow('reference access')
+      const empty = await client.callTool({
+        name: 'review_answer',
+        arguments: { questionId: 'geo-choice-1', draft: emptyDraft() },
+      })
+      expect(empty.isError).toBe(true)
+      const submitted = await client.callTool({
+        name: 'review_answer',
+        arguments: { questionId: 'geo-choice-1', draft: { ...emptyDraft(), choiceId: 'A' } },
+      })
+      expect(submitted.isError).not.toBe(true)
+      expect(structured(submitted).review).toHaveProperty('explanation')
+    } finally {
+      await client.close()
+    }
+  })
   it.each(['chinese', 'math', 'english', 'history'] as const)(
     '%s supports list/get/review and cannot widen scope',
     async (subject) => {
@@ -111,7 +201,7 @@ describe('new subjects over real MCP stdio', () => {
         await client.connect(
           new StdioClientTransport({
             command: process.execPath,
-            args: [output, '--subject', subject],
+            args: [output, '--reference-access', 'full', '--subject', subject],
             stderr: 'pipe',
           }),
         )
@@ -180,7 +270,7 @@ describe('new subjects over real MCP stdio', () => {
       await client.connect(
         new StdioClientTransport({
           command: process.execPath,
-          args: [output, '--subject', 'history'],
+          args: [output, '--reference-access', 'full', '--subject', 'history'],
           stderr: 'pipe',
         }),
       )

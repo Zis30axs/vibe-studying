@@ -1,0 +1,183 @@
+.github-profile {
+  min-width: 0;
+  padding: 15px 17px;
+  border: 1px solid var(--border, #dedfdc);
+  border-radius: 13px;
+  background: var(--surface, #fff);
+}
+.github-profile-summary {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.github-profile-avatar {
+  display: block;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.github-profile-initial {
+  display: grid;
+  place-items: center;
+  background: #eef0ed;
+  color: #4c6458;
+  font-size: 13px;
+  font-weight: 750;
+}
+.github-profile-identity {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+.github-profile-identity strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.github-profile-identity span {
+  font-size: 10px;
+  color: #738078;
+  overflow-wrap: anywhere;
+}
+.github-profile-actions,
+.github-profile-input-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.github-profile button {
+  padding: 5px 8px;
+  border: 1px solid #dce2dc;
+  border-radius: 6px;
+  background: #f6f8f5;
+  color: #4a6455;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.github-profile button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.github-profile button:focus-visible,
+.github-profile input:focus-visible {
+  outline: 2px solid #5e8d73;
+  outline-offset: 2px;
+}
+.github-profile-form {
+  margin-top: 13px;
+  display: grid;
+  gap: 8px;
+}
+.github-profile-form label {
+  font-size: 12px;
+  font-weight: 650;
+}
+.github-profile-form input {
+  width: 130px;
+  min-width: 80px;
+  flex: 1;
+  border: 1px solid #d7ded8;
+  border-radius: 6px;
+  padding: 7px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+.github-profile-form p,
+.github-profile-note {
+  margin: 3px 0 0;
+  color: #7a827d;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.github-profile-error {
+  margin: 10px 0 0;
+  color: #ab4939;
+  font-size: 12px;
+  line-height: 1.5;
+}
+/* Compact header variant; its editor never changes the toolbar height. */
+.github-profile.topbar-profile {
+  position: relative;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  max-width: 285px;
+  flex-shrink: 1;
+}
+.topbar-profile .github-profile-summary {
+  gap: 8px;
+  min-height: 32px;
+}
+.topbar-profile .github-profile-avatar {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  font-size: 10px;
+}
+.topbar-profile .github-profile-identity {
+  max-width: 140px;
+}
+.topbar-profile .github-profile-identity strong,
+.topbar-profile .github-profile-identity span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar-profile .github-profile-identity strong {
+  font-size: 11px;
+}
+.topbar-profile .github-profile-identity span {
+  font-size: 9px;
+}
+.topbar-profile .github-profile-actions {
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+.topbar-profile button {
+  padding: 4px 6px;
+  font-size: 10px;
+}
+.topbar-profile .github-profile-form {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(340px, calc(100vw - 24px));
+  box-sizing: border-box;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid #dce2dc;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 35px #23362c22;
+}
+.topbar-profile > .github-profile-error,
+.topbar-profile > .github-profile-note {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(280px, calc(100vw - 24px));
+  padding: 10px;
+  margin: 0;
+  box-sizing: border-box;
+  border: 1px solid #dce2dc;
+  border-radius: 8px;
+  background: #fff;
+}
+.topbar-profile > .github-profile-note {
+  display: none;
+}
+@media (max-width: 760px) {
+  .topbar-profile .github-profile-identity {
+    display: none;
+  }
+  .topbar-profile .github-profile-summary {
+    gap: 5px;
+  }
+}

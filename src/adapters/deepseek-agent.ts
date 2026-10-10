@@ -1,3 +1,4 @@
+import { buildGradingContext } from './review-contexts'
 import { z } from 'zod'
 import { subjectGuidance } from '../shared/subjects'
 import type { AnswerDraft, Question } from '../shared/types'
@@ -88,33 +89,8 @@ export class DeepSeekAgent implements AgentAdapter {
     } catch {
       throw new Error('题目、作答或大纲无效；未发送到 DeepSeek。')
     }
-    // Explicit allowlist: no question ID, account identity, history, previous grades, or unused blocks.
-    const data = {
-      question: {
-        kind: question.kind,
-        subject: question.subject,
-        title: question.title,
-        prompt: question.prompt,
-        source: question.source,
-        tags: question.tags,
-        reference: question.explanation,
-        choices: question.choices,
-        correctAnswer: question.correctAnswer,
-        rubric: question.kind === 'choice' ? [] : question.rubric,
-      },
-      answer: {
-        choiceId: draft.choiceId,
-        text: draft.text,
-        ...(draft.argument
-          ? { argument: draft.argument }
-          : {
-              blocks: draft.blocks.map(({ category, label, text }) => ({ category, label, text })),
-            }),
-        drawing: draft.drawing,
-        ...(question.subject === 'math' && draft.math ? { math: draft.math } : {}),
-      },
-      ...(syllabus ? { syllabus } : {}),
-    }
+    const data = buildGradingContext(question, draft, syllabus)
+
     const controller = new AbortController()
     let timedOut = false
     let timeout: ReturnType<typeof setTimeout> | undefined

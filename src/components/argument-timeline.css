@@ -1,0 +1,73 @@
+.argument-timeline {
+  margin-top: 12px;
+  border: 1px solid #dce5e9;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fafcfd;
+  font-size: 12px;
+}
+.argument-timeline summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #31586c;
+}
+.argument-timeline p {
+  margin: 8px 0;
+  color: #596d79;
+}
+.argument-timeline form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+  margin: 10px 0;
+}
+.argument-timeline label {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 160px;
+}
+.argument-timeline input {
+  font-size: 12px;
+  padding: 6px 8px;
+}
+.argument-timeline button {
+  font-size: 11px;
+  padding: 6px 8px;
+}
+.argument-timeline ol {
+  padding: 0;
+  list-style: none;
+  max-height: 250px;
+  overflow: auto;
+}
+.argument-timeline li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid #e5ebee;
+}
+.argument-timeline li > div {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.argument-timeline small {
+  display: block;
+  font-size: 10px;
+  color: #657781;
+}
+.revision-branch {
+  color: #518b85;
+}
+.revision-confirm {
+  padding: 10px;
+  background: #fff5df;
+  border: 1px solid #ddc391;
+  border-radius: 6px;
+}
+.revision-confirm button + button {
+  margin-left: 8px;
+}

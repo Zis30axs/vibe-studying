@@ -10,6 +10,7 @@ import { createExamCraftMcpServer } from './create-server'
 export function parseArguments(args: string[]) {
   let bankPath: string | undefined
   let subject: string | undefined
+  let referenceAccess: 'student' | 'full' | undefined
   const tags: string[] = []
   const questionIds: string[] = []
   for (let index = 0; index < args.length; index += 2) {
@@ -17,6 +18,12 @@ export function parseArguments(args: string[]) {
     const value = args[index + 1]
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${flag}`)
     switch (flag) {
+      case '--reference-access':
+        if (referenceAccess) throw new Error('Use --reference-access only once')
+        if (value !== 'student' && value !== 'full')
+          throw new Error('--reference-access must be student or full')
+        referenceAccess = value
+        break
       case '--bank':
         if (bankPath) throw new Error('Use --bank only once')
         bankPath = value
@@ -42,11 +49,11 @@ export function parseArguments(args: string[]) {
     ...(tags.length ? { tags } : {}),
     ...(questionIds.length ? { questionIds } : {}),
   })
-  return { bankPath, scope }
+  return { bankPath, scope, referenceAccess: referenceAccess ?? 'student' }
 }
 
 async function main(): Promise<void> {
-  const { bankPath, scope } = parseArguments(process.argv.slice(2))
+  const { bankPath, scope, referenceAccess } = parseArguments(process.argv.slice(2))
   // A supplied bank is an explicit snapshot. The MCP process never writes desktop data.
   const questions = bankPath
     ? questionBankSchema.parse(await readJsonFile(bankPath)).questions
@@ -55,6 +62,7 @@ async function main(): Promise<void> {
     new LocalQuestionBank(undefined, questions),
     new LocalRuleAgent(),
     scope,
+    { referenceAccess },
   )
   await server.connect(new StdioServerTransport())
 }

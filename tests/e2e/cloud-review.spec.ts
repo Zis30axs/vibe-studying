@@ -1,5 +1,5 @@
 import { test, expect, _electron as electron, type ElectronApplication } from '@playwright/test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -20,9 +20,42 @@ async function launch(configured: boolean, model = 'deepseek-flash') {
   if (configured) env.DEEPSEEK_API_KEY = 'synthetic-test-marker-not-a-credential'
   app = await electron.launch({ args: ['.'], env })
   await app.evaluate(() => {
+    // Replace the actual HTTPS boundary, so neither DNS nor network is used.
+    // Existing fetch-shaped fixtures below are merely in-memory response factories.
     globalThis.fetch = async () => {
       throw new Error('Network disabled by desktop test')
     }
+    const https = process.getBuiltinModule('https')
+    const { EventEmitter } = process.getBuiltinModule('events')
+    const { Readable } = process.getBuiltinModule('stream')
+    https.request = ((
+      input: string,
+      options: import('node:https').RequestOptions,
+      callback: (response: import('node:http').IncomingMessage) => void,
+    ) => {
+      const request = new EventEmitter()
+      Object.assign(request, {
+        end(body: string) {
+          Promise.resolve()
+            .then(async () => {
+              const result = await globalThis.fetch(input, {
+                method: 'POST',
+                headers: options.headers as Record<string, string>,
+                body,
+              })
+              const response = Readable.from([Buffer.from(await result.arrayBuffer())])
+              Object.assign(response, {
+                statusCode: result.status,
+                headers: Object.fromEntries(result.headers.entries()),
+              })
+              callback(response as import('node:http').IncomingMessage)
+            })
+            .catch((error) => request.emit('error', error))
+          return request
+        },
+      })
+      return request
+    }) as typeof https.request
   })
   const page = await app.firstWindow()
   await expect(page.getByRole('heading', { name: '今天，理解得更深一点。' })).toBeVisible()
@@ -37,9 +70,9 @@ test.afterEach(async () => {
   await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
-test('missing provider configuration remains offline and exposes no credential UI', async () => {
+test('missing provider configuration remains offline and keeps credentials out of practice', async () => {
   const page = await launch(false)
-  await expect(page.getByRole('radio', { name: /DeepSeek 云端/ })).toBeDisabled()
+  await expect(page.getByRole('radio', { name: /自定义模型/ })).toBeDisabled()
   await expect(page.locator('input[type=password]')).toHaveCount(0)
   await page.getByRole('radio').first().click()
   await page.getByRole('button', { name: '提交并审阅' }).click()
@@ -51,7 +84,7 @@ test('mock cloud workflow requires each consent, preserves draft on failure and 
   expect(await app!.evaluate(() => process.env.DEEPSEEK_API_KEY)).toBeUndefined()
   await page.getByRole('radio').first().click()
   await page.getByLabel('思考笔记').fill('Synthetic answer for integration testing only')
-  await page.getByRole('radio', { name: /DeepSeek 云端/ }).check()
+  await page.getByRole('radio', { name: /自定义模型/ }).check()
   await page.getByLabel('学习范围 / 考纲（可选）').fill('Synthetic scope only')
   const consent = page.getByRole('checkbox', { name: /我同意本次/ })
   await expect(page.getByRole('button', { name: '提交并审阅' })).toBeDisabled()
@@ -100,7 +133,7 @@ test('mock cloud workflow requires each consent, preserves draft on failure and 
   await page.screenshot({ path: 'test-results/deepseek-mocked-workflow.png', fullPage: true })
   const state = await page.evaluate(() => window.examcraft!.loadState())
   expect(state.attempts).toHaveLength(1)
-  expect(state.attempts[0].reviewer).toMatch(/^DeepSeek/)
+  expect(state.attempts[0].reviewer).toBe('openai-chat · deepseek-flash')
   await app!.close()
   app = undefined
   const restored = await launch(false)
@@ -111,8 +144,13 @@ test('mock cloud workflow requires each consent, preserves draft on failure and 
 
 test('invalid optional cloud model never blocks the offline desktop', async () => {
   const page = await launch(false, 'invalid model / value')
-  await expect(page.getByText(/DeepSeek 模型配置无效/)).toBeVisible()
-  await expect(page.getByRole('radio', { name: /DeepSeek 云端/ })).toBeDisabled()
+  const capabilities = await page.evaluate(() => window.examcraft!.getCapabilities())
+  expect(capabilities.deepseek?.error).toContain('DeepSeek 模型配置无效')
+  expect(await page.evaluate(() => window.examcraft!.getModelConfig())).toMatchObject({
+    model: 'deepseek-flash',
+    configured: false,
+  })
+  await expect(page.getByRole('radio', { name: /自定义模型/ })).toBeDisabled()
   await page.getByRole('radio').first().click()
   await page.getByRole('button', { name: '提交并审阅' }).click()
   await expect(page.getByLabel('审阅结果').locator('.score')).toHaveText('4 / 4')
@@ -137,7 +175,7 @@ test('mock humanities review resets consent and sends current final text and str
   expect(principle).toBeTruthy()
   await page.getByTestId(`text-${principle}`).fill('Synthetic principle before edit.')
   await page.locator('#answer-text').fill('Synthetic manually authored final text.')
-  await page.getByRole('radio', { name: /DeepSeek 云端/ }).check()
+  await page.getByRole('radio', { name: /自定义模型/ }).check()
   const consent = page.getByRole('checkbox', { name: /我同意本次/ })
   await consent.check()
   await page
@@ -212,7 +250,7 @@ test('mock humanities review resets consent and sends current final text and str
       )
     }
   })
-  await page.getByRole('radio', { name: /DeepSeek 云端/ }).check()
+  await page.getByRole('radio', { name: /自定义模型/ }).check()
   await page.getByRole('checkbox', { name: /我同意本次/ }).check()
   await page.getByRole('button', { name: '提交并审阅', exact: true }).click()
   await expect(page.getByText('Synthetic humanities feedback only', { exact: true })).toBeVisible()
@@ -229,6 +267,78 @@ test('mock humanities review resets consent and sends current final text and str
   expect(submitted.attempts).toHaveLength(2)
   expect(submitted.attempts[1].draft.text).toBe(expectedText)
   expect(submitted.attempts[1].draft.argument).toEqual(expectedArgument)
-  expect(submitted.attempts[1].reviewer).toMatch(/^DeepSeek/)
+  expect(submitted.attempts[1].reviewer).toBe('openai-chat · deepseek-flash')
   await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('model settings offer four protocols without network and keep synthetic keys session-only', async () => {
+  const page = await launch(false)
+  await app!.evaluate(() => {
+    ;(globalThis as typeof globalThis & { modelNetworkCalls: number }).modelNetworkCalls = 0
+    globalThis.fetch = async () => {
+      ;(globalThis as typeof globalThis & { modelNetworkCalls: number }).modelNetworkCalls += 1
+      throw new Error('Network disabled by desktop test')
+    }
+  })
+  await page.getByRole('button', { name: '配置模型 / 协议', exact: true }).click()
+  const settings = page.getByRole('region', { name: '模型设置', exact: true })
+  const protocol = settings.getByLabel('API 协议', { exact: true })
+  await expect(protocol.locator('option')).toHaveCount(4)
+  for (const value of ['anthropic', 'gemini', 'openai-responses', 'openai-chat']) {
+    await protocol.selectOption(value)
+    await expect(settings.getByLabel('接口基础地址', { exact: true })).toHaveValue(/^https:\/\//)
+    await expect(settings.getByLabel('模型名称', { exact: true })).not.toHaveValue('')
+  }
+  const syntheticKey = 'synthetic-settings-marker-not-a-credential'
+  const keyInput = settings.getByLabel('API Key（仅本次会话）', { exact: true })
+  await keyInput.fill(syntheticKey)
+  await settings.getByRole('button', { name: '保存模型设置', exact: true }).click()
+  await expect(settings.getByRole('status')).toContainText(
+    '设置已保存。密钥仅在本次应用会话中使用。',
+  )
+  await expect(keyInput).toHaveValue('')
+  const config = await page.evaluate(() => window.examcraft!.getModelConfig())
+  expect(config).toMatchObject({
+    protocol: 'openai-chat',
+    baseUrl: 'https://api.deepseek.com',
+    configured: true,
+  })
+  expect(JSON.stringify(config)).not.toContain(syntheticKey)
+  const persisted = await app!.evaluate(async () => {
+    const { readFile } = process.getBuiltinModule('fs/promises')
+    const { join } = process.getBuiltinModule('path')
+    return readFile(join(process.env.EXAMCRAFT_USER_DATA!, 'model-config.json'), 'utf8')
+  })
+  expect(persisted).not.toContain(syntheticKey)
+  expect(persisted).not.toContain('apiKey')
+  expect(
+    await page.evaluate(() =>
+      JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }),
+    ),
+  ).not.toContain(syntheticKey)
+  expect(
+    await app!.evaluate(
+      () => (globalThis as typeof globalThis & { modelNetworkCalls: number }).modelNetworkCalls,
+    ),
+  ).toBe(0)
+  await app!.close()
+  app = undefined
+  const restored = await launch(false)
+  expect(await restored.evaluate(() => window.examcraft!.getModelConfig())).toMatchObject({
+    protocol: 'openai-chat',
+    baseUrl: 'https://api.deepseek.com',
+    model: config.model,
+    revision: config.revision,
+    configured: false,
+  })
+  await expect(restored.getByRole('radio', { name: /自定义模型/ })).toBeDisabled()
+})
+
+test('unreadable optional model configuration does not block offline practice', async () => {
+  await writeFile(join(directory, 'model-config.json'), '{invalid json', 'utf8')
+  const page = await launch(false)
+  await expect(page.getByRole('alert')).toContainText('本地练习仍可使用')
+  await page.getByRole('radio').first().click()
+  await page.getByRole('button', { name: '提交并审阅', exact: true }).click()
+  await expect(page.getByLabel('审阅结果').locator('.score')).toHaveText('4 / 4')
 })

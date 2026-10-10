@@ -1,0 +1,233 @@
+/* The practice page puts question and writing before optional large tools. */
+.page-content {
+  padding: 18px 24px 0;
+}
+.topbar {
+  min-height: 54px;
+  height: 54px;
+}
+.page-heading {
+  margin-bottom: 14px;
+}
+.page-heading h1 {
+  font-size: 22px;
+}
+.page-heading p {
+  margin-top: 4px;
+}
+.page-heading .eyebrow {
+  display: none;
+}
+.learning-overview {
+  margin-bottom: 14px;
+  border: 1px solid #dce6e5;
+  border-radius: 9px;
+  background: #fff;
+}
+.learning-overview > summary {
+  padding: 9px 13px;
+  cursor: pointer;
+  color: #526e6d;
+  font-size: 12px;
+}
+.learning-overview > .stats-row {
+  padding: 10px 12px 0;
+  margin-bottom: 12px;
+}
+.learning-overview .activity-heatmap {
+  border: 0;
+  margin-bottom: 0;
+  padding-top: 5px;
+}
+.study-layout {
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.question-library {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 100px);
+  overflow: auto;
+}
+.exercise-top {
+  padding: 12px 20px 0;
+}
+.question-prompt {
+  padding: 14px 20px;
+}
+.question-prompt h2 {
+  font-size: 20px;
+}
+.question-prompt > p {
+  margin: 10px 0;
+  font-size: 14px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+.answer-area {
+  padding: 14px 20px 18px;
+}
+.answer-tabs {
+  min-height: 43px;
+}
+.thinking-label {
+  margin-top: 0;
+}
+#answer-text {
+  min-height: 112px;
+  max-height: 60vh;
+  resize: vertical;
+  font-size: 14px;
+}
+.workbench-dock {
+  margin-top: 14px;
+  border: 1px solid #d5e1e6;
+  border-radius: 9px;
+  background: #f8fbfc;
+  overflow: hidden;
+}
+.workbench-dock-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 9px;
+}
+.workbench-dock-bar > button {
+  font-size: 12px;
+  padding: 5px 8px;
+}
+.workbench-dock-bar > button:first-child {
+  border: 0;
+  background: transparent;
+  color: #31586c;
+  font-weight: 650;
+}
+.workbench-dock-bar > span {
+  flex: 1;
+  font-size: 10px;
+  color: #6e818e;
+}
+.workbench-dock-body {
+  height: 380px;
+  min-height: 220px;
+  max-height: 75vh;
+  overflow: auto;
+  resize: vertical;
+  padding: 0 10px 10px;
+  border-top: 1px solid #e1e8ed;
+}
+.workbench-dock-body[hidden] {
+  display: none;
+}
+.workbench-dock.is-expanded .workbench-dock-body {
+  height: 620px;
+  max-height: 85vh;
+}
+.workbench-dock .humanities-composer {
+  margin-top: 10px;
+}
+.workbench-dock .humanities-heading h3 {
+  font-size: 16px;
+}
+.workbench-dock .humanities-eyebrow {
+  display: none;
+}
+.workbench-dock .humanities-instruction {
+  margin: 5px 0 8px;
+}
+.workbench-dock .math-workbench,
+.workbench-dock .geography-workbench {
+  margin-top: 10px;
+}
+.review-settings {
+  padding: 10px 12px;
+  margin-top: 14px;
+}
+.review-settings legend {
+  font-size: 12px;
+}
+.review-settings-note {
+  margin-top: 6px;
+}
+.model-settings-shortcut {
+  padding: 4px 8px;
+  margin-top: 8px;
+  font-size: 11px;
+}
+.exercise-actions {
+  padding: 12px 20px;
+}
+@media (min-width: 1500px) {
+  .study-layout {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+  .page-content {
+    padding: 20px 30px 0;
+  }
+}
+@media (max-width: 950px) {
+  .page-content {
+    padding: 14px 16px 0;
+  }
+  .study-layout {
+    grid-template-columns: 175px minmax(0, 1fr);
+  }
+  .workbench-dock-bar > span {
+    display: none;
+  }
+}
+@media (max-width: 700px) {
+  .study-layout {
+    grid-template-columns: 1fr;
+  }
+  .question-library {
+    position: static;
+    max-height: 220px;
+  }
+  .page-heading h1 {
+    font-size: 18px;
+  }
+  .page-heading p {
+    display: none;
+  }
+  .question-prompt,
+  .answer-area {
+    padding: 12px 14px;
+  }
+  .workbench-dock-body {
+    height: 320px;
+  }
+}
+.workbench-dock.self-sizing .workbench-dock-body {
+  height: auto;
+  max-height: none;
+  resize: none;
+  overflow: visible;
+}
+.role-boundary-note {
+  margin: 0 0 9px;
+  font-size: 11px;
+  color: #536f73;
+}
+.generated-question-note {
+  padding: 8px 10px;
+  border: 1px solid #dcc68e;
+  background: #fff8e9;
+  border-radius: 7px;
+  color: #725d2c;
+  font-size: 11px !important;
+}
+.review-question-figure {
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid #dce6e5;
+  border-radius: 8px;
+}
+.question-prompt .geography-figure svg {
+  max-height: 320px;
+}
+.geo-generator-preview .geography-figure svg {
+  max-height: 360px;
+}

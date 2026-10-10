@@ -1,5 +1,8 @@
+import { geographyFigureSchema, questionProvenanceSchema } from './geography-figure'
 import { z } from 'zod'
+import { studentQuestionSchema } from './student-question'
 import { parseExpression } from './math'
+import { assertArgumentRevisions, MAX_ARGUMENT_REVISIONS } from './argument-revisions'
 import { subjects } from '../shared/subjects'
 import type {
   AnswerDraft,
@@ -54,6 +57,8 @@ export const questionSchema = z
     tags: z.array(shortText).max(20),
     maxScore: z.number().int().min(1).max(100),
     explanation: z.string().trim().min(1).max(20000),
+    figure: geographyFigureSchema.optional(),
+    provenance: questionProvenanceSchema.optional(),
     choices: z
       .array(z.strictObject({ id: idSchema, text: z.string().trim().min(1).max(5000) }))
       .min(2)
@@ -65,6 +70,7 @@ export const questionSchema = z
   })
   .superRefine((question, ctx) => {
     const fail = (message: string) => ctx.addIssue({ code: 'custom', message })
+    if (question.figure && question.subject !== 'geography') fail('示意图只适用于地理题')
     if (!uniqueIds(question.choices) || !uniqueIds(question.blocks) || !uniqueIds(question.rubric))
       fail('选项、模块和评分项的标识符必须各自唯一')
     if (question.kind === 'choice') {
@@ -166,15 +172,76 @@ function boundedArgumentNodeSchema(depth: number): z.ZodType<ArgumentNode> {
         : z.array(boundedArgumentNodeSchema(depth + 1)).max(MAX_ARGUMENT_NODES),
   })
 }
-const argumentWireSchema = z.strictObject({
-  version: z.literal(1),
+const argumentSnapshotWireSchema = z.strictObject({
   roots: z.array(boundedArgumentNodeSchema(1)).max(MAX_ARGUMENT_NODES),
+  canvas: z
+    .strictObject({
+      positions: z
+        .record(
+          idSchema,
+          z.strictObject({
+            x: z.number().finite().min(-100000).max(100000),
+            y: z.number().finite().min(-100000).max(100000),
+          }),
+        )
+        .refine(
+          (positions) => Object.keys(positions).length <= MAX_ARGUMENT_NODES,
+          '画布最多 80 个位置',
+        ),
+      viewport: z.strictObject({
+        x: z.number().finite().min(-100000).max(100000),
+        y: z.number().finite().min(-100000).max(100000),
+        zoom: z.number().finite().min(0.15).max(2),
+      }),
+    })
+    .optional(),
+})
+const argumentWireSchema = argumentSnapshotWireSchema.extend({
+  version: z.literal(1),
+  revisions: z
+    .strictObject({
+      headId: idSchema,
+      nodes: z
+        .array(
+          z.strictObject({
+            id: idSchema,
+            parentId: idSchema.nullable(),
+            label: z.string().trim().min(1).max(80),
+            createdAt: z.number().int().min(0).max(8640000000000000),
+            source: z.enum(['manual', 'ai']),
+            snapshot: argumentSnapshotWireSchema,
+          }),
+        )
+        .min(1)
+        .max(MAX_ARGUMENT_REVISIONS),
+    })
+    .optional(),
 })
 export const argumentSchema = z.preprocess((input, ctx) => {
   try {
     if (!input || typeof input !== 'object' || Array.isArray(input))
       throw new Error('论证结构格式无效')
     assertArgumentRoots((input as Record<string, unknown>).roots)
+    const revisions = (input as Record<string, unknown>).revisions
+    if (revisions !== undefined) assertArgumentRevisions(revisions)
+    // Zod records omit __proto__ while parsing. Reject dangerous raw keys before
+    // that normalization so corrupt persisted documents never appear valid.
+    const canvases = [
+      (input as Record<string, unknown>).canvas,
+      ...((revisions as ArgumentDocument['revisions'])?.nodes.map((node) => node.snapshot.canvas) ??
+        []),
+    ]
+    for (const rawCanvas of canvases) {
+      if (rawCanvas && typeof rawCanvas === 'object' && 'positions' in rawCanvas) {
+        const positions = rawCanvas.positions
+        if (
+          positions &&
+          typeof positions === 'object' &&
+          Object.keys(positions).some((key) => !idSchema.safeParse(key).success)
+        )
+          throw new Error('画布位置包含无效模块 ID')
+      }
+    }
   } catch (error) {
     ctx.addIssue({
       code: 'custom',
@@ -229,10 +296,17 @@ export const attemptSchema = z
     ...reviewSchema.shape,
     id: idSchema,
     questionId: idSchema,
+    questionSnapshot: studentQuestionSchema.optional(),
     submittedAt: z.iso.datetime(),
     draft: draftSchema,
   })
   .superRefine((attempt, ctx) => {
+    if (
+      attempt.questionSnapshot &&
+      (attempt.questionSnapshot.id !== attempt.questionId ||
+        attempt.questionSnapshot.maxScore !== attempt.maxScore)
+    )
+      ctx.addIssue({ code: 'custom', message: '题目快照与提交不一致' })
     if (
       attempt.score > attempt.maxScore ||
       attempt.rubric.some((item) => item.earned > item.possible)
@@ -280,7 +354,8 @@ export function validateAnswer(
 }
 
 export const submissionOptionsSchema = z.strictObject({
-  provider: z.enum(['local', 'deepseek']),
+  provider: z.enum(['local', 'deepseek', 'cloud']),
+  configRevision: z.number().int().nonnegative().optional(),
   cloudConsent: z.boolean().optional(),
   syllabus: z.string().trim().max(4000).optional(),
 })

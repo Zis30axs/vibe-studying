@@ -17,6 +17,10 @@ async function launch() {
   delete env.DEEPSEEK_API_KEY
   app = await electron.launch({ args: ['.'], env })
   const page = await app.firstWindow()
+  const overview = page.locator('details.learning-overview')
+  await expect(overview).not.toHaveAttribute('open', '')
+  await expect(page.getByTestId('activity-heatmap')).toBeHidden()
+  await overview.locator('summary').click()
   await expect(page.getByTestId('activity-heatmap')).toBeVisible()
   return page
 }

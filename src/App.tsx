@@ -4,8 +4,9 @@ import type {
   ArgumentNode,
   Attempt,
   Capabilities,
-  Question,
+  StudentQuestion,
   StudyState,
+  ModelConfig,
 } from './shared/types'
 import { emptyDraft, emptyMathState } from './shared/types'
 import { subjects, subjectLabel, kindLabel, subjectGuidance } from './shared/subjects'
@@ -14,6 +15,15 @@ import { ActivityHeatmap } from './components/ActivityHeatmap'
 import { generateArgumentText } from './domain/argument'
 import { GeographyWorkbench } from './components/GeographyWorkbench'
 import { MathWorkbench } from './components/MathWorkbench'
+import { WorkbenchDock } from './components/WorkbenchDock'
+import { ModelSettings } from './components/ModelSettings'
+import { SelectionAdvisor } from './components/SelectionAdvisor'
+import { GitHubProfile } from './components/GitHubProfile'
+import { KnowledgeLibrary } from './components/KnowledgeLibrary'
+import type { KnowledgeEvidence } from './shared/knowledge'
+import type { AdvisorCitation } from './shared/types'
+import { GeographyGenerator } from './components/GeographyGenerator'
+import { GeographyFigure } from './components/GeographyFigure'
 
 type View = 'practice' | 'math' | 'politics' | 'geography' | 'history' | 'adapters'
 const navigation: { id: View; icon: string; label: string; caption: string }[] = [
@@ -58,7 +68,8 @@ function ArgumentSnapshot({ nodes }: { nodes: ArgumentNode[] }) {
   )
 }
 
-function Review({ attempt, question }: { attempt: Attempt; question?: Question }) {
+function Review({ attempt, question }: { attempt: Attempt; question?: StudentQuestion }) {
+  question = attempt.questionSnapshot ?? question
   return (
     <section className="review-panel" aria-label="审阅结果">
       <div className="review-heading">
@@ -71,10 +82,18 @@ function Review({ attempt, question }: { attempt: Attempt; question?: Question }
           <span> / {attempt.maxScore}</span>
         </div>
       </div>
+      {question?.figure && (
+        <details className="review-question-figure">
+          <summary>本次题目与示意图快照</summary>
+          <h3>{question.title}</h3>
+          <p>{question.prompt}</p>
+          <GeographyFigure figure={question.figure} />
+        </details>
+      )}
       <p className="review-feedback">{attempt.feedback}</p>
       <div className="notice">
         {attempt.reviewer} ·{' '}
-        {attempt.reviewer.toLowerCase().startsWith('deepseek')
+        {!attempt.reviewer.toLowerCase().includes('local') && !attempt.reviewer.includes('本地')
           ? 'AI 练习反馈可能有误，不代表官方成绩；绘图依据坐标与连线数据审阅，请核查。'
           : question?.kind === 'choice'
             ? '按标准答案核对，仅供练习，不代表官方成绩'
@@ -148,19 +167,27 @@ function Review({ attempt, question }: { attempt: Attempt; question?: Question }
 }
 
 export default function App() {
-  const [questions, setQuestions] = useState<Question[]>([])
+  const [questions, setQuestions] = useState<StudentQuestion[]>([])
   const [state, setState] = useState<StudyState>(blankState)
   const [capabilities, setCapabilities] = useState<Capabilities>()
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState('')
   const [view, setView] = useState<View>('practice')
+  const currentViewRef = useRef<View>(view)
+  currentViewRef.current = view
   const [subject, setSubject] = useState('all')
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState('')
   const [tab, setTab] = useState<'answer' | 'review'>('answer')
   const [busy, setBusy] = useState(false)
-  const [provider, setProvider] = useState<'local' | 'deepseek'>('local')
+  const [provider, setProvider] = useState<'local' | 'cloud'>('local')
   const [cloudConsent, setCloudConsent] = useState(false)
+  const [modelConfig, setModelConfig] = useState<ModelConfig | null>(null)
+  const practiceRootRef = useRef<HTMLElement>(null)
+  const [knowledgeExcerpts, setKnowledgeExcerpts] = useState<KnowledgeEvidence[]>([])
+  const [knowledgeCitation, setKnowledgeCitation] = useState<
+    (AdvisorCitation & { requestId: string }) | undefined
+  >()
   const [syllabus, setSyllabus] = useState('')
   const submitting = useRef(false)
   const [saveStatus, setSaveStatus] = useState('草稿自动保存到本机')
@@ -179,14 +206,18 @@ export default function App() {
     }
     setError('')
     try {
-      const [bank, stored, info] = await Promise.all([
+      const [bank, stored, info, config] = await Promise.all([
         api.listQuestions(),
         api.loadState(),
         api.getCapabilities(),
+        api.getModelConfig().catch(() => null),
       ])
       setQuestions(bank)
       setState(stored)
       setCapabilities(info)
+      setModelConfig(config)
+      if (!config)
+        setError('模型设置暂时无法读取；本地练习仍可使用。请检查模型配置文件或恢复备份。')
       setSelectedId(bank[0]?.id ?? '')
       setLoaded(true)
     } catch (err) {
@@ -209,8 +240,12 @@ export default function App() {
   currentQuestionId.current = selected?.id
   useEffect(() => {
     setCloudConsent(false)
-  }, [selected?.id, provider])
-  const cloudReady = Boolean(capabilities?.deepseek?.configured)
+  }, [selected?.id, provider, modelConfig?.revision])
+  useEffect(() => {
+    setKnowledgeExcerpts([])
+    setKnowledgeCitation(undefined)
+  }, [selected?.id, view])
+  const cloudReady = Boolean(modelConfig?.configured)
   const draft = selected ? (state.drafts[selected.id] ?? emptyDraft()) : emptyDraft()
   const attempts = selected ? state.attempts.filter((a) => a.questionId === selected.id) : []
   const latest = attempts.at(-1)
@@ -225,6 +260,7 @@ export default function App() {
   function changeView(next: View) {
     if (busy) return
     setView(next)
+    setKnowledgeExcerpts([])
     setSubject('all')
     setQuery('')
     setTab('answer')
@@ -233,6 +269,7 @@ export default function App() {
   function selectQuestion(id: string) {
     if (busy) return
     setSelectedId(id)
+    setKnowledgeExcerpts([])
     setTab('answer')
     setMessage('')
   }
@@ -260,8 +297,8 @@ export default function App() {
   }
   async function submit() {
     if (!selected || !api || busy || submitting.current) return
-    if (provider === 'deepseek' && (!cloudReady || !cloudConsent)) {
-      setError('请先完成 DeepSeek 安全配置，并确认本次数据发送。')
+    if (provider === 'cloud' && (!cloudReady || !cloudConsent)) {
+      setError('请先配置自定义模型，并确认本次数据发送。')
       return
     }
     submitting.current = true
@@ -271,7 +308,9 @@ export default function App() {
     try {
       const attempt = await api.submitAnswer(selected.id, draft, {
         provider,
-        ...(provider === 'deepseek' ? { cloudConsent, syllabus: syllabus.trim() } : {}),
+        ...(provider === 'cloud'
+          ? { cloudConsent, syllabus: syllabus.trim(), configRevision: modelConfig?.revision }
+          : {}),
       })
       setState((s) => ({
         ...s,
@@ -380,7 +419,7 @@ export default function App() {
             <button onClick={importBank} disabled={!loaded || busy} className="import-button">
               ＋ 导入题库
             </button>
-            <span className="avatar">我</span>
+            <GitHubProfile className="topbar-profile" />
           </div>
         </header>
         <div className="page-content">
@@ -434,48 +473,89 @@ export default function App() {
                   <span className="status-dot" /> 自主练习 <span>·</span> 不限时
                 </div>
               </div>
-              <div className="stats-row">
-                <div className="stat-card">
-                  <span className="stat-icon teal">▤</span>
-                  <div>
-                    <span>可用题目</span>
-                    <strong>
-                      {questions.length}
-                      <small>道</small>
-                    </strong>
+              <details className="learning-overview">
+                <summary>
+                  学习概览 · {completed}/{questions.length} 题 · {state.attempts.length} 次提交 ·
+                  展开热力图
+                </summary>
+                <div className="stats-row">
+                  <div className="stat-card">
+                    <span className="stat-icon teal">▤</span>
+                    <div>
+                      <span>可用题目</span>
+                      <strong>
+                        {questions.length}
+                        <small>道</small>
+                      </strong>
+                    </div>
+                    <span className="stat-note">内置示例 + 导入题库</span>
                   </div>
-                  <span className="stat-note">内置示例 + 导入题库</span>
-                </div>
-                <div className="stat-card">
-                  <span className="stat-icon amber">✓</span>
-                  <div>
-                    <span>已练习</span>
-                    <strong>
-                      {completed}
-                      <small>/ {questions.length} 道</small>
-                    </strong>
+                  <div className="stat-card">
+                    <span className="stat-icon amber">✓</span>
+                    <div>
+                      <span>已练习</span>
+                      <strong>
+                        {completed}
+                        <small>/ {questions.length} 道</small>
+                      </strong>
+                    </div>
+                    <span className="stat-note">累计 {state.attempts.length} 次作答</span>
                   </div>
-                  <span className="stat-note">累计 {state.attempts.length} 次作答</span>
-                </div>
-                <div className="stat-card">
-                  <span className="stat-icon blue">↗</span>
-                  <div>
-                    <span>选择题正确率</span>
-                    <strong>{accuracy}</strong>
+                  <div className="stat-card">
+                    <span className="stat-icon blue">↗</span>
+                    <div>
+                      <span>选择题正确率</span>
+                      <strong>{accuracy}</strong>
+                    </div>
+                    <span className="stat-note">按全部提交次数统计</span>
                   </div>
-                  <span className="stat-note">按全部提交次数统计</span>
                 </div>
-              </div>
 
-              <ActivityHeatmap
-                attempts={state.attempts}
-                questions={questions}
-                onSelectAttempt={(id) => {
-                  if (busy) return
-                  setHistoryId(id)
-                  changeView('history')
-                }}
-              />
+                <ActivityHeatmap
+                  attempts={state.attempts}
+                  questions={questions}
+                  onSelectAttempt={(id) => {
+                    if (busy) return
+                    setHistoryId(id)
+                    changeView('history')
+                  }}
+                />
+              </details>
+
+              {['practice', 'math', 'politics', 'geography'].includes(view) && (
+                <KnowledgeLibrary
+                  key={`knowledge-${selected?.id ?? 'none'}-${view}`}
+                  initialSubject={selected?.subject ?? 'politics'}
+                  api={api!}
+                  selectedEvidence={knowledgeExcerpts}
+                  onSelectEvidence={setKnowledgeExcerpts}
+                  citation={knowledgeCitation}
+                />
+              )}
+
+              {view === 'geography' && (
+                <GeographyGenerator
+                  api={api!}
+                  config={modelConfig}
+                  disabled={busy}
+                  onAccepted={(question) => {
+                    setQuestions((previous) => [
+                      ...previous.filter((item) => item.id !== question.id),
+                      question,
+                    ])
+                    if (
+                      currentViewRef.current === 'geography' &&
+                      currentQuestionId.current === selected?.id
+                    ) {
+                      setSelectedId(question.id)
+                      setSubject('all')
+                      setQuery('')
+                      setTab('answer')
+                      setMessage('AI 原创题已加入本机题库；参考解析会在提交后展示。')
+                    }
+                  }}
+                />
+              )}
 
               {(view === 'practice' ||
                 view === 'math' ||
@@ -565,7 +645,11 @@ export default function App() {
                     </div>
                   </section>
 
-                  <section className="exercise-card card" aria-label="作答工作区">
+                  <section
+                    ref={practiceRootRef}
+                    className="exercise-card card"
+                    aria-label="作答工作区"
+                  >
                     {selected ? (
                       <>
                         <div className="exercise-top">
@@ -576,9 +660,16 @@ export default function App() {
                           </div>
                           <span className="question-id">{selected.id}</span>
                         </div>
-                        <div className="question-prompt">
+                        <div className="question-prompt" data-advisor-source="question">
                           <h2>{selected.title}</h2>
                           <p>{selected.prompt}</p>
+                          {selected.figure && <GeographyFigure figure={selected.figure} />}
+                          {selected.provenance?.kind === 'ai-generated' && (
+                            <p className="generated-question-note">
+                              AI 原创练习 ·
+                              示意图仅做结构校验，题目、参考解析和评分依据未经过事实核验，非真实考试题。
+                            </p>
+                          )}
                           <div className="question-source">
                             {selected.source} <span>·</span> {selected.tags.join(' / ')}
                           </div>
@@ -623,7 +714,10 @@ export default function App() {
                           </>
                         ) : (
                           <>
-                            <div className="answer-area">
+                            <div className="answer-area" data-role-context="student">
+                              <p className="role-boundary-note">
+                                作答区 · 只显示题目与自己的草稿。顾问建议需你确认后才会修改模块。
+                              </p>
                               {selected.kind === 'choice' && (
                                 <>
                                   <div className="section-label">选择你认为正确的一项</div>
@@ -649,33 +743,6 @@ export default function App() {
                                   </div>
                                 </>
                               )}
-                              {['politics', 'history', 'chinese', 'geography'].includes(
-                                selected.kind,
-                              ) && (
-                                <HumanitiesComposer
-                                  key={`argument-${selected.id}`}
-                                  subject={selected.subject}
-                                  draft={draft}
-                                  onChange={updateDraft}
-                                  disabled={busy}
-                                />
-                              )}
-                              {selected.kind === 'geography' && (
-                                <GeographyWorkbench
-                                  key={`geography-${selected.id}`}
-                                  drawing={draft.drawing}
-                                  onChange={(drawing) => updateDraft({ ...draft, drawing })}
-                                  disabled={busy}
-                                />
-                              )}
-                              {selected.subject === 'math' && (
-                                <MathWorkbench
-                                  key={`math-${selected.id}`}
-                                  value={draft.math ?? emptyMathState()}
-                                  onChange={(math) => updateDraft({ ...draft, math })}
-                                  disabled={busy}
-                                />
-                              )}
                               <label className="thinking-label" htmlFor="answer-text">
                                 {selected.kind === 'choice'
                                   ? '思考笔记'
@@ -688,7 +755,8 @@ export default function App() {
                               </label>
                               <textarea
                                 id="answer-text"
-                                rows={selected.kind === 'choice' ? 3 : 8}
+                                data-advisor-source="answer"
+                                rows={selected.kind === 'choice' ? 3 : 5}
                                 lang={selected.subject === 'english' ? 'en' : 'zh-CN'}
                                 value={draft.text}
                                 disabled={busy}
@@ -707,6 +775,79 @@ export default function App() {
                                     0}{' '}
                                   words
                                 </p>
+                              )}
+                              <SelectionAdvisor
+                                key={`${selected.id}-${view}`}
+                                api={api!}
+                                config={modelConfig}
+                                question={selected}
+                                sourceRevision={JSON.stringify({
+                                  question: selected,
+                                  text: draft.text,
+                                  choiceId: draft.choiceId,
+                                  blocks: draft.blocks,
+                                  roots: draft.argument?.roots,
+                                })}
+                                knowledgeExcerpts={knowledgeExcerpts}
+                                onClearKnowledgeExcerpts={() => setKnowledgeExcerpts([])}
+                                onOpenKnowledgeCitation={(citation) => {
+                                  setKnowledgeCitation({
+                                    ...citation,
+                                    requestId: crypto.randomUUID(),
+                                  })
+                                }}
+                                scopeRef={practiceRootRef}
+                              />
+                              {['politics', 'history', 'chinese', 'geography'].includes(
+                                selected.kind,
+                              ) && (
+                                <WorkbenchDock
+                                  key={`dock-argument-${selected.id}-${view}`}
+                                  title="文科模块工作台"
+                                  selfSizing
+                                  initiallyOpen={view === 'politics'}
+                                >
+                                  <div data-advisor-source="argument">
+                                    <HumanitiesComposer
+                                      key={`argument-${selected.id}`}
+                                      subject={selected.subject}
+                                      question={selected}
+                                      config={modelConfig}
+                                      api={api!}
+                                      draft={draft}
+                                      onChange={updateDraft}
+                                      disabled={busy}
+                                    />
+                                  </div>
+                                </WorkbenchDock>
+                              )}
+                              {selected.kind === 'geography' && (
+                                <WorkbenchDock
+                                  key={`dock-geography-${selected.id}-${view}`}
+                                  title="地理交互工作台"
+                                  initiallyOpen={view === 'geography'}
+                                >
+                                  <GeographyWorkbench
+                                    key={`geography-${selected.id}`}
+                                    drawing={draft.drawing}
+                                    onChange={(drawing) => updateDraft({ ...draft, drawing })}
+                                    disabled={busy}
+                                  />
+                                </WorkbenchDock>
+                              )}
+                              {selected.subject === 'math' && (
+                                <WorkbenchDock
+                                  key={`dock-math-${selected.id}-${view}`}
+                                  title="数学交互工作台"
+                                  initiallyOpen={view === 'math'}
+                                >
+                                  <MathWorkbench
+                                    key={`math-${selected.id}`}
+                                    value={draft.math ?? emptyMathState()}
+                                    onChange={(math) => updateDraft({ ...draft, math })}
+                                    disabled={busy}
+                                  />
+                                </WorkbenchDock>
                               )}
                               {provider === 'local' && selected.kind !== 'choice' && (
                                 <div className="notice compact">
@@ -737,16 +878,16 @@ export default function App() {
                                     <input
                                       type="radio"
                                       name="review-provider"
-                                      value="deepseek"
-                                      checked={provider === 'deepseek'}
+                                      value="cloud"
+                                      checked={provider === 'cloud'}
                                       disabled={!cloudReady}
                                       onChange={() => {
-                                        setProvider('deepseek')
+                                        setProvider('cloud')
                                         setCloudConsent(false)
                                       }}
                                     />
                                     <span>
-                                      <strong>DeepSeek 云端</strong>
+                                      <strong>自定义模型</strong>
                                       <small>
                                         {cloudReady
                                           ? '联网审阅，可能产生 API 费用'
@@ -755,23 +896,23 @@ export default function App() {
                                     </span>
                                   </label>
                                 </div>
-                                {capabilities?.deepseek?.error && (
-                                  <p className="review-settings-note">
-                                    {capabilities.deepseek.error}
-                                  </p>
-                                )}
+                                <button
+                                  type="button"
+                                  className="model-settings-shortcut"
+                                  onClick={() => changeView('adapters')}
+                                >
+                                  配置模型 / 协议
+                                </button>
                                 {!cloudReady && (
                                   <p className="review-settings-note">
-                                    DeepSeek
-                                    凭据需在应用外通过安全配置提供，配置后重启应用。本页面不接收 API
-                                    Key；具体步骤见 README。
+                                    先在「题库与 Agent」中设置协议、接收方、模型及本次会话密钥。
                                   </p>
                                 )}
-                                {provider === 'deepseek' && (
+                                {provider === 'cloud' && (
                                   <div className="cloud-review-options">
                                     <p className="review-settings-note">
-                                      模型：{capabilities?.deepseek?.model} ·
-                                      接收方：https://api.deepseek.com 。AI
+                                      模型：{modelConfig?.model} · 协议：{modelConfig?.protocol} ·
+                                      接收方：{modelConfig?.baseUrl} 。AI
                                       反馈可能有误，请对照参考思路核查。
                                     </p>
                                     <label htmlFor="review-syllabus">学习范围 / 考纲（可选）</label>
@@ -804,8 +945,8 @@ export default function App() {
                                         解析和评分要点）、我的答案（选项、最终正文、模块文字与嵌套论证结构、绘图坐标
                                         / 连线、数学函数表达式 / 参数 /
                                         测量选点）及上方学习范围发送至
-                                        DeepSeek（https://api.deepseek.com）进行审阅，可能产生 API
-                                        费用。每次提交均需重新确认。
+                                        {modelConfig?.baseUrl}（{modelConfig?.model}
+                                        ）进行审阅，可能产生 API 费用。每次提交均需重新确认。
                                       </span>
                                     </label>
                                   </div>
@@ -830,7 +971,7 @@ export default function App() {
                                 disabled={
                                   !canSubmit ||
                                   busy ||
-                                  (provider === 'deepseek' && (!cloudReady || !cloudConsent))
+                                  (provider === 'cloud' && (!cloudReady || !cloudConsent))
                                 }
                               >
                                 {busy ? '正在审阅…' : '提交并审阅'}{' '}
@@ -875,7 +1016,8 @@ export default function App() {
                         >
                           <span>
                             <strong>
-                              {questions.find((q) => q.id === attempt.questionId)?.title ??
+                              {attempt.questionSnapshot?.title ??
+                                questions.find((q) => q.id === attempt.questionId)?.title ??
                                 attempt.questionId}
                             </strong>
                             <small>
@@ -930,16 +1072,24 @@ export default function App() {
                     <h2>审阅 Agent</h2>
                     <p>{capabilities?.reviewer}</p>
                     <div className="adapter-detail">
-                      本地模式：选择题按答案核对；主观题按关键词反馈得分点。DeepSeek
+                      本地模式：选择题按答案核对；主观题按关键词反馈得分点。自定义模型
                       模式：确认发送范围后获取云端练习反馈。
                     </div>
                     <div className="notice">
                       {cloudReady
-                        ? `DeepSeek 已配置（${capabilities?.deepseek?.model}），仅表示检测到配置，尚未验证网络或凭据。每次提交前需确认发送，可能产生 API 费用。`
-                        : 'DeepSeek 尚未配置。请在应用外安全配置凭据后重启；不要把 API Key 粘贴到答案或学习范围中。'}
+                        ? `已配置 ${modelConfig?.model}；尚未验证网络或凭据。每次发送需确认，可能产生 API 费用。`
+                        : '自定义模型尚未配置。API Key 仅在本次应用会话使用，不要粘贴到答案或学习范围中。'}
                       当前使用已有题库，不生成新试题；反馈不代表官方成绩。
                     </div>
                   </section>
+                  <ModelSettings
+                    api={api!}
+                    config={modelConfig}
+                    onChange={(next) => {
+                      setModelConfig(next)
+                      setCloudConsent(false)
+                    }}
+                  />
                   <section className="card adapter-card wide">
                     <span className="adapter-symbol">⌘</span>
                     <h2>MCP 题库服务</h2>

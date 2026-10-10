@@ -21,6 +21,10 @@ test('math tools: drag, precise edits, measurements, function, undo, snapshots a
       .getByRole('button', { name: /数学工作台/ })
       .click()
     await page.locator('.question-item').filter({ hasText: '解一元一次方程' }).click()
+    await expect(page.getByRole('button', { name: '数学交互工作台', exact: true })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
     return page
   }
   try {
@@ -49,6 +53,7 @@ test('math tools: drag, precise edits, measurements, function, undo, snapshots a
     await expect(work.getByText('∠ABC = 90.00°', { exact: true })).toBeVisible()
     await work.getByRole('button', { name: '移动点', exact: true }).click()
     const point = work.getByRole('button', { name: '数学点 C (3, 4)', exact: true })
+    await point.scrollIntoViewIfNeeded()
     const box = (await point.boundingBox())!
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
     await page.mouse.down()

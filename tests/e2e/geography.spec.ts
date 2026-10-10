@@ -20,6 +20,10 @@ async function launchWorkspace(
       .getByRole('navigation', { name: '工作区导航' })
       .getByRole('button', { name: /地理工作台/ })
       .click()
+    await expect(page.getByRole('button', { name: '地理交互工作台', exact: true })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
     await expect(page.getByRole('region', { name: '地理绘图工作台', exact: true })).toBeVisible()
     return { app, page }
   } catch (error) {

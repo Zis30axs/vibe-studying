@@ -113,3 +113,93 @@ test('closing the window drains a slow in-flight draft write before exit', async
   page = await launch()
   await expect(page.getByLabel('思考笔记')).toHaveValue('这段草稿在关闭窗口之前仍在写入。')
 })
+
+test('compact practice keeps writing before optional tools and supports collapse and resizing', async () => {
+  const page = await launch()
+  const overview = page.locator('details.learning-overview')
+  await expect(overview).not.toHaveAttribute('open', '')
+  await expect(page.getByTestId('activity-heatmap')).toBeHidden()
+  await overview.locator('summary').click()
+  await expect(page.getByTestId('activity-heatmap')).toBeVisible()
+  await overview.locator('summary').click()
+  await expect(page.getByTestId('activity-heatmap')).toBeHidden()
+
+  for (const item of [
+    { subject: '政治', title: '让社区更新回应居民需求', dock: '文科模块工作台' },
+    { subject: '地理', title: '在经纬网中定位与连线', dock: '地理交互工作台' },
+    { subject: '数学', title: '解一元一次方程', dock: '数学交互工作台' },
+  ]) {
+    await page
+      .getByLabel('按学科筛选')
+      .getByRole('button', { name: item.subject, exact: true })
+      .click()
+    await page.locator('.question-item').filter({ hasText: item.title }).click()
+    const dock = page.getByRole('region', { name: `${item.dock}面板`, exact: true })
+    const toggle = dock.getByRole('button', { name: item.dock, exact: true })
+    const body = dock.locator('.workbench-dock-body')
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await expect(body).toBeHidden()
+    expect(
+      await dock.evaluate((element) =>
+        Boolean(
+          document.querySelector('#answer-text')!.compareDocumentPosition(element) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      ),
+    ).toBe(true)
+    await page.locator('#answer-text').fill(`Compact draft: ${item.subject}`)
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(body).toBeVisible()
+    if (item.subject === '政治') {
+      await expect(body).toHaveCSS('resize', 'none')
+      await expect(body).toHaveCSS('overflow-y', 'visible')
+      await expect(dock.getByRole('button', { name: '扩大视图', exact: true })).toHaveCount(0)
+      const canvas = dock.locator('.free-canvas')
+      await expect(canvas).toHaveCSS('resize', 'vertical')
+      const compactHeight = (await canvas.boundingBox())!.height
+      await dock.getByRole('button', { name: '展开画布', exact: true }).click()
+      await expect(dock.getByRole('button', { name: '收起画布', exact: true })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      )
+      expect((await canvas.boundingBox())!.height).toBeGreaterThan(compactHeight)
+      await dock.getByRole('button', { name: '收起画布', exact: true }).click()
+      expect((await canvas.boundingBox())!.height).toBeCloseTo(compactHeight, 0)
+    } else {
+      await expect(body).toHaveCSS('resize', 'vertical')
+      await expect(body).toHaveCSS('overflow-y', 'auto')
+      const compactHeight = (await body.boundingBox())!.height
+      await dock.getByRole('button', { name: '扩大视图', exact: true }).click()
+      await expect(dock.getByRole('button', { name: '紧凑视图', exact: true })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      )
+      expect((await body.boundingBox())!.height).toBeGreaterThan(compactHeight)
+      await dock.getByRole('button', { name: '紧凑视图', exact: true }).click()
+      expect((await body.boundingBox())!.height).toBeCloseTo(compactHeight, 0)
+    }
+    await toggle.click()
+    await expect(body).toBeHidden()
+    await expect(page.locator('#answer-text')).toHaveValue(`Compact draft: ${item.subject}`)
+  }
+
+  // Exercise responsive CSS at two common desktop content sizes, including narrow layout.
+  for (const width of [900, 1280]) {
+    await app!.evaluate(({ BrowserWindow }, width) => {
+      const window = BrowserWindow.getAllWindows()[0]
+      window.setMinimumSize(640, 480)
+      window.setContentSize(width, 800)
+    }, width)
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(width)
+    await expect(page.locator('#answer-text')).toBeVisible()
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+    await expect(page.getByRole('button', { name: '数学交互工作台', exact: true })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+  }
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})

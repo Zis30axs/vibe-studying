@@ -1,23 +1,51 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { DragEvent } from 'react'
-import type { AnswerDraft, ArgumentKind, ArgumentNode, Subject } from '../shared/types'
+import type { DragEvent, PointerEvent as ReactPointerEvent } from 'react'
+import type {
+  AnswerDraft,
+  ArgumentCanvas,
+  ArgumentDocument,
+  ArgumentKind,
+  ArgumentNode,
+  ArgumentPosition,
+  Subject,
+  StudentQuestion,
+  ModelConfig,
+  ExamCraftApi,
+  ModuleReviewSuggestion,
+} from '../shared/types'
 import {
   argumentFromDraft,
+  argumentCanvas,
+  flattenArgument,
+  boundArgumentCoordinate,
+  positionArgumentNode,
   generateArgumentText,
   insertArgumentNode,
   isArgumentContainer,
-  MAX_ARGUMENT_DEPTH,
   MAX_ARGUMENT_NODES,
   MAX_ARGUMENT_TEXT_LENGTH,
   moveArgumentNode,
   removeArgumentNode,
 } from '../domain/argument'
 
+import { ModuleReviewPanel } from './ModuleReviewPanel'
+import { ArgumentTimeline } from './ArgumentTimeline'
+import {
+  checkpointArgument,
+  restoreArgumentRevision,
+  hasArgumentDraftChanges,
+  checkpointAcceptedEdit,
+} from '../domain/argument-revisions'
+import { applyModuleSuggestion } from '../domain/module-review'
+
 interface HumanitiesComposerProps {
   subject: Subject
   draft: AnswerDraft
   onChange: (draft: AnswerDraft) => void
   disabled?: boolean
+  question?: StudentQuestion
+  config?: ModelConfig | null
+  api?: ExamCraftApi
 }
 
 type BlockInfo = { label: string; prompt: string }
@@ -95,10 +123,6 @@ function locate(
   return null
 }
 
-function countNodes(nodes: ArgumentNode[]): number {
-  return nodes.reduce((total, node) => total + 1 + countNodes(node.children), 0)
-}
-
 function updateText(nodes: ArgumentNode[], id: string, text: string): ArgumentNode[] {
   return nodes.map((node) =>
     node.id === id ? { ...node, text } : { ...node, children: updateText(node.children, id, text) },
@@ -139,6 +163,9 @@ export function HumanitiesComposer({
   draft,
   onChange,
   disabled = false,
+  question,
+  config,
+  api,
 }: HumanitiesComposerProps) {
   const id = useId()
   const info = subjectInfo[subject] ?? subjectInfo.politics!
@@ -146,69 +173,74 @@ export function HumanitiesComposer({
   const [template, setTemplate] = useState<Template>('argument')
   const [error, setError] = useState('')
   const [announcement, setAnnouncement] = useState('')
-  const [hoveredSocket, setHoveredSocket] = useState<string | null>(null)
-  const [removed, setRemoved] = useState<Location | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [history, setHistory] = useState<ArgumentDocument[]>([])
+  const [future, setFuture] = useState<ArgumentDocument[]>([])
+  const [previewCanvas, setPreviewCanvas] = useState<ArgumentCanvas | null>(null)
   const [syncConfirmation, setSyncConfirmation] = useState<{
     generated: string
     previous: string
   } | null>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
   const activeDrag = useRef<Placement | null>(null)
+  const gesture = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    nodeId?: string
+    canvas: ArgumentCanvas
+    moved: boolean
+  } | null>(null)
   const hadStructuredDraft = useRef(Boolean(draft.argument || draft.blocks.length))
   const conversion = useMemo(() => {
     try {
-      const roots = argumentFromDraft(draft).roots
-      return { roots, generated: generateArgumentText(roots), error: '' }
+      const document = argumentFromDraft(draft)
+      return {
+        document: { ...document, canvas: argumentCanvas(document) },
+        generated: generateArgumentText(document.roots),
+        error: '',
+      }
     } catch (cause) {
       return {
-        roots: [] as ArgumentNode[],
+        document: {
+          version: 1 as const,
+          roots: [] as ArgumentNode[],
+          canvas: { positions: {}, viewport: { x: 0, y: 0, zoom: 1 } },
+        },
         generated: '',
         error: cause instanceof Error ? cause.message : '旧草稿暂时无法转换为模块。',
       }
     }
   }, [draft])
-  const { roots, generated } = conversion
-  const total = countNodes(roots)
-  const atLimit = total >= MAX_ARGUMENT_NODES
-  const selectedLabel =
-    selection?.type === 'new'
-      ? info.blocks[selection.kind].label
-      : selection?.type === 'move'
-        ? info.blocks[locate(roots, selection.id)?.node.kind ?? 'analysis'].label
-        : ''
+  const { document, generated } = conversion
+  const { roots } = document
+  const canvas = previewCanvas ?? document.canvas
+  const flat = useMemo(() => flattenArgument(roots), [roots])
+  const selected =
+    selection?.type === 'move' ? flat.find(({ node }) => node.id === selection.id) : undefined
+  const atLimit = flat.length >= MAX_ARGUMENT_NODES
 
   useEffect(() => {
     if (
       syncConfirmation &&
       (syncConfirmation.generated !== generated || syncConfirmation.previous !== draft.text)
-    ) {
+    )
       setSyncConfirmation(null)
-    }
   }, [generated, draft.text, syncConfirmation])
-
   useEffect(() => {
-    // A redo creates a new empty draft under the same question key. Do not let an
-    // old selection or deletion undo put material from the previous attempt back.
     if (hadStructuredDraft.current && !draft.argument && !draft.blocks.length && !draft.text) {
       setSelection(null)
-      setRemoved(null)
+      setHistory([])
+      setFuture([])
       setError('')
       setAnnouncement('')
-      setHoveredSocket(null)
+      setPreviewCanvas(null)
       setSyncConfirmation(null)
       activeDrag.current = null
+      gesture.current = null
     }
     hadStructuredDraft.current = Boolean(draft.argument || draft.blocks.length)
   }, [draft.argument, draft.blocks, draft.text])
-
-  function commit(nextRoots: ArgumentNode[], message?: string) {
-    if (disabled) return
-    // Validate generated length before saving; this also keeps large edits from failing silently later.
-    generateArgumentText(nextRoots)
-    onChange({ ...draft, argument: { version: 1, roots: nextRoots } })
-    setError('')
-    setSyncConfirmation(null)
-    if (message) setAnnouncement(message)
-  }
 
   function attempt(action: () => void) {
     if (disabled) return
@@ -218,395 +250,431 @@ export function HumanitiesComposer({
       setError(cause instanceof Error ? cause.message : '无法完成操作，请检查模块结构。')
     }
   }
-
-  function select(placement: Placement) {
+  function commit(next: ArgumentDocument, message = '', record = true) {
     if (disabled) return
-    setSelection(placement)
+    generateArgumentText(next.roots)
+    const normalized = { ...next, canvas: argumentCanvas(next) }
+    if (record) {
+      setHistory((items) => [...items.slice(-49), document])
+      setFuture([])
+    }
+    onChange({ ...draft, argument: normalized })
     setError('')
-    setAnnouncement('已选中模块，请点击目标卡槽；按 Escape 取消。')
+    setSyncConfirmation(null)
+    if (message) setAnnouncement(message)
   }
-
-  function place(parentId: string | null, index: number, placement = selection) {
-    if (!placement || disabled) return
+  function commitRoots(next: ArgumentNode[], message = '') {
+    commit({ ...document, roots: next }, message)
+  }
+  function undo() {
+    if (disabled || !history.length) return
+    const previous = history[history.length - 1]
+    setFuture((items) => [...items, document])
+    setHistory(history.slice(0, -1))
+    commit(
+      { ...previous, revisions: document.revisions },
+      '已撤销上一步模块编辑；版本时间树仍保留。',
+      false,
+    )
+    setSelection(null)
+  }
+  function redo() {
+    if (disabled || !future.length) return
+    setHistory((items) => [...items, document])
+    setFuture(future.slice(0, -1))
+    commit(
+      { ...future[future.length - 1], revisions: document.revisions },
+      '已重做模块编辑。',
+      false,
+    )
+  }
+  function worldPoint(clientX: number, clientY: number): ArgumentPosition {
+    const box = viewportRef.current!.getBoundingClientRect()
+    return {
+      x: boundArgumentCoordinate((clientX - box.left - canvas.viewport.x) / canvas.viewport.zoom),
+      y: boundArgumentCoordinate((clientY - box.top - canvas.viewport.y) / canvas.viewport.zoom),
+    }
+  }
+  function centerPoint(): ArgumentPosition {
+    const box = viewportRef.current!.getBoundingClientRect()
+    const point = worldPoint(box.left + box.width / 2, box.top + box.height / 2)
+    return { x: point.x - 110, y: point.y - 75 }
+  }
+  function place(placement: Placement, point: ArgumentPosition, centerView = false) {
     attempt(() => {
-      const next =
-        placement.type === 'new'
-          ? insertArgumentNode(roots, makeNode(placement.kind), parentId, index)
-          : moveArgumentNode(roots, placement.id, parentId, index)
-      commit(next, parentId ? '模块已吸附到容器内。' : '模块已吸附到答案主序列。')
-      setSelection(null)
-      setHoveredSocket(null)
+      if (placement.type === 'new') {
+        const node = makeNode(placement.kind)
+        const next = { ...document, roots: insertArgumentNode(roots, node, null, roots.length) }
+        const placed = positionArgumentNode(next, node.id, point)
+        if (centerView && viewportRef.current) {
+          const box = viewportRef.current.getBoundingClientRect()
+          placed.canvas!.viewport.x = boundArgumentCoordinate(
+            box.width / 2 - (point.x + 112) * placed.canvas!.viewport.zoom,
+          )
+          placed.canvas!.viewport.y = boundArgumentCoordinate(
+            box.height / 2 - (point.y + 75) * placed.canvas!.viewport.zoom,
+          )
+        }
+        commit(placed, '模块已自由放置；默认追加到成文顺序末尾。')
+        setSelection({ type: 'move', id: node.id })
+      } else
+        commit(
+          positionArgumentNode(document, placement.id, point),
+          '位置已保存，逻辑关系与成文顺序保持不变。',
+        )
     })
   }
-
-  function startDrag(event: DragEvent, placement: Placement) {
-    event.stopPropagation()
+  function placeAtCenter() {
+    if (selection?.type !== 'new') return
+    const origin = centerPoint()
+    let point = origin
+    const occupied = Object.values(canvas.positions)
+    // Keyboard insertion finds an empty nearby cell, then brings that location
+    // to the viewport center. Explicit pointer drops retain exact coordinates.
+    for (let index = 0; index <= MAX_ARGUMENT_NODES; index++) {
+      point = { x: origin.x + (index % 9) * 250, y: origin.y + Math.floor(index / 9) * 175 }
+      if (!occupied.some((p) => Math.abs(p.x - point.x) < 240 && Math.abs(p.y - point.y) < 165))
+        break
+    }
+    place(selection, point, true)
+  }
+  function revealNode(nodeId: string) {
+    setSelection({ type: 'move', id: nodeId })
+    const box = viewportRef.current?.getBoundingClientRect(),
+      point = canvas.positions[nodeId]
+    if (!box || !point) return
+    const { x, y, zoom } = canvas.viewport
     if (
-      disabled ||
-      (event.target instanceof Element && event.target.closest('textarea, input, select'))
+      point.x * zoom + x < 0 ||
+      (point.x + 224) * zoom + x > box.width ||
+      point.y * zoom + y < 0 ||
+      (point.y + 150) * zoom + y > box.height
     ) {
+      commit(
+        {
+          ...document,
+          canvas: {
+            ...canvas,
+            viewport: {
+              ...canvas.viewport,
+              x: boundArgumentCoordinate(box.width / 2 - (point.x + 112) * zoom),
+              y: boundArgumentCoordinate(box.height / 2 - (point.y + 75) * zoom),
+            },
+          },
+        },
+        '',
+        false,
+      )
+    }
+  }
+  function startPaletteDrag(event: DragEvent, kind: ArgumentKind) {
+    if (disabled) {
       event.preventDefault()
       return
     }
-    activeDrag.current = placement
-    event.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ owner: id, placement }))
-    event.dataTransfer.effectAllowed = placement.type === 'new' ? 'copy' : 'move'
-    select(placement)
+    activeDrag.current = { type: 'new', kind }
+    event.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ owner: id }))
+    event.dataTransfer.effectAllowed = 'copy'
   }
-
-  function endDrag() {
-    activeDrag.current = null
-    setHoveredSocket(null)
-  }
-
-  function drop(event: DragEvent, parentId: string | null, index: number) {
+  function drop(event: DragEvent) {
     event.preventDefault()
-    event.stopPropagation()
-    if (disabled) return
     try {
-      const payload: { owner?: string; placement?: Placement } = JSON.parse(
-        event.dataTransfer.getData(DRAG_TYPE),
-      )
-      if (payload.owner !== id || !activeDrag.current) return
-      place(parentId, index, activeDrag.current)
+      const payload = JSON.parse(event.dataTransfer.getData(DRAG_TYPE))
+      if (payload.owner === id && activeDrag.current)
+        place(activeDrag.current, worldPoint(event.clientX, event.clientY))
     } catch {
       setError('请从此组装台拖入模块。')
     }
-    endDrag()
+    activeDrag.current = null
   }
-
-  function socket(parentId: string | null, index: number, testId: string, label: string) {
-    return (
-      <button
-        type="button"
-        key={testId}
-        className={`humanities-socket${selection ? ' is-ready' : ''}${hoveredSocket === testId ? ' is-over' : ''}`}
-        data-testid={testId}
-        data-parent-id={parentId ?? 'root'}
-        data-slot-index={index}
-        aria-label={label}
-        disabled={disabled || (!selection && !activeDrag.current)}
-        onClick={() => place(parentId, index)}
-        onDragOver={(event) => {
-          if (!disabled && event.dataTransfer.types.includes(DRAG_TYPE)) {
-            event.preventDefault()
-            event.stopPropagation()
-            event.dataTransfer.dropEffect = activeDrag.current?.type === 'new' ? 'copy' : 'move'
-            setHoveredSocket(testId)
-          }
-        }}
-        onDragLeave={() => setHoveredSocket(null)}
-        onDrop={(event) => drop(event, parentId, index)}
-      >
-        <span aria-hidden="true">＋</span>
-        <span>{hoveredSocket === testId ? '松开，吸附在这里' : label}</span>
-      </button>
-    )
+  function startGesture(event: ReactPointerEvent, nodeId?: string) {
+    if (disabled || event.button !== 0) return
+    event.stopPropagation()
+    if (!nodeId && selection?.type === 'new') {
+      place(selection, worldPoint(event.clientX, event.clientY))
+      return
+    }
+    event.preventDefault()
+    if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    gesture.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      nodeId,
+      canvas: structuredClone(canvas),
+      moved: false,
+    }
+    if (nodeId) setSelection({ type: 'move', id: nodeId })
   }
-
-  function moveSibling(nodeId: string, parentId: string | null, index: number, direction: -1 | 1) {
-    attempt(() =>
-      commit(
-        moveArgumentNode(roots, nodeId, parentId, index + (direction === 1 ? 2 : -1)),
-        '模块顺序已调整。',
-      ),
-    )
+  function moveGesture(event: ReactPointerEvent) {
+    const current = gesture.current
+    if (!current || current.pointerId !== event.pointerId) return
+    const dx = event.clientX - current.startX,
+      dy = event.clientY - current.startY
+    if (Math.abs(dx) + Math.abs(dy) > 2) current.moved = true
+    const next = structuredClone(current.canvas)
+    if (current.nodeId) {
+      const original = current.canvas.positions[current.nodeId]
+      next.positions[current.nodeId] = {
+        x: boundArgumentCoordinate(original.x + dx / next.viewport.zoom),
+        y: boundArgumentCoordinate(original.y + dy / next.viewport.zoom),
+      }
+    } else {
+      next.viewport.x = boundArgumentCoordinate(next.viewport.x + dx)
+      next.viewport.y = boundArgumentCoordinate(next.viewport.y + dy)
+    }
+    setPreviewCanvas(next)
   }
-
-  function moveOut(nodeId: string, parentId: string | null) {
-    if (!parentId) return
-    const parent = locate(roots, parentId)
-    if (!parent) return
-    attempt(() =>
-      commit(
-        moveArgumentNode(roots, nodeId, parent.parentId, parent.index + 1),
-        '模块已移到外一层。',
-      ),
-    )
-  }
-
-  function remove(nodeId: string) {
-    const location = locate(roots, nodeId)
-    if (!location) return
-    attempt(() => {
-      commit(removeArgumentNode(roots, nodeId), '已移除模块及其内部内容，可以撤销。')
-      setRemoved(location)
-      if (selection?.type === 'move' && locate([location.node], selection.id)) setSelection(null)
-    })
-  }
-
-  function undoRemove() {
-    if (!removed) return
-    attempt(() => {
-      const siblings = removed.parentId ? locate(roots, removed.parentId)?.node.children : roots
-      if (!siblings) throw new Error('原容器已不存在，暂时无法撤销这次移除。')
-      commit(
-        insertArgumentNode(
-          roots,
-          removed.node,
-          removed.parentId,
-          Math.min(removed.index, siblings.length),
+  function finishGesture(event: ReactPointerEvent, cancel = false) {
+    const current = gesture.current
+    if (!current || current.pointerId !== event.pointerId) return
+    if (current.moved && !cancel) {
+      const next = structuredClone(current.canvas)
+      const dx = event.clientX - current.startX,
+        dy = event.clientY - current.startY
+      if (current.nodeId) {
+        const original = current.canvas.positions[current.nodeId]
+        next.positions[current.nodeId] = {
+          x: boundArgumentCoordinate(original.x + dx / next.viewport.zoom),
+          y: boundArgumentCoordinate(original.y + dy / next.viewport.zoom),
+        }
+      } else {
+        next.viewport.x = boundArgumentCoordinate(next.viewport.x + dx)
+        next.viewport.y = boundArgumentCoordinate(next.viewport.y + dy)
+      }
+      attempt(() =>
+        commit(
+          { ...document, canvas: next },
+          current.nodeId ? '自由位置已保存，成文顺序不变。' : '',
+          Boolean(current.nodeId),
         ),
-        '已恢复移除的模块及其内部内容。',
       )
-      setRemoved(null)
-    })
+    }
+    gesture.current = null
+    setPreviewCanvas(null)
   }
-
-  function renderNodes(nodes: ArgumentNode[], parentId: string | null = null, depth = 1) {
-    return nodes.map((node, index) => {
-      const details = info.blocks[node.kind]
-      const container = isArgumentContainer(node.kind)
-      const selected = selection?.type === 'move' && selection.id === node.id
-      return (
-        <div className="humanities-node-slot" key={node.id}>
-          {socket(parentId, index, `drop-before-${node.id}`, `放在第 ${index + 1} 个模块前`)}
-          <article
-            className={`humanities-node humanities-kind-${node.kind}${container ? ' is-container' : ''}${selected ? ' is-selected' : ''}`}
-            data-testid={`block-${node.id}`}
-            data-block-id={node.id}
-            data-block-kind={node.kind}
-            data-depth={depth}
-            draggable={!disabled}
-            onDragStart={(event) => startDrag(event, { type: 'move', id: node.id })}
-            onDragEnd={endDrag}
-            aria-label={`${details.label}模块，第 ${depth} 层`}
-          >
-            <header className="humanities-node-header">
-              <button
-                type="button"
-                className="humanities-drag-handle"
-                data-testid={`drag-${node.id}`}
-                title="拖动模块；也可点击选择，再点目标卡槽"
-                aria-label={`选择或拖动${details.label}模块`}
-                aria-pressed={selected}
-                disabled={disabled}
-                draggable={!disabled}
-                onDragStart={(event) => startDrag(event, { type: 'move', id: node.id })}
-                onDragEnd={endDrag}
-                onClick={() => select({ type: 'move', id: node.id })}
-              >
-                ⠿
-              </button>
-              <strong>{details.label}</strong>
-              <span className="humanities-node-level">
-                {container ? '可嵌套' : '内容'} · {depth} 层
-              </span>
-              <button
-                type="button"
-                className="humanities-remove"
-                data-testid={`remove-${node.id}`}
-                aria-label={`移除${details.label}模块及子模块`}
-                disabled={disabled}
-                onClick={() => remove(node.id)}
-              >
-                ×
-              </button>
-            </header>
-            <div className="humanities-node-body">
-              <label className="humanities-sr-only" htmlFor={`${id}-text-${node.id}`}>
-                {details.label}内容
-              </label>
-              <textarea
-                id={`${id}-text-${node.id}`}
-                data-testid={`text-${node.id}`}
-                value={node.text}
-                placeholder={details.prompt}
-                rows={container ? 2 : 3}
-                maxLength={MAX_ARGUMENT_TEXT_LENGTH}
-                disabled={disabled}
-                onChange={(event) =>
-                  attempt(() => commit(updateText(roots, node.id, event.target.value)))
-                }
-              />
-              <div className="humanities-node-actions">
-                <button
-                  type="button"
-                  data-testid={`select-${node.id}`}
-                  aria-pressed={selected}
-                  disabled={disabled}
-                  onClick={() => select({ type: 'move', id: node.id })}
-                >
-                  {selected ? '已选中' : '选择位置'}
-                </button>
-                <button
-                  type="button"
-                  data-testid={`move-up-${node.id}`}
-                  aria-label={`上移${details.label}模块`}
-                  disabled={disabled || index === 0}
-                  onClick={() => moveSibling(node.id, parentId, index, -1)}
-                >
-                  ↑ 上移
-                </button>
-                <button
-                  type="button"
-                  data-testid={`move-down-${node.id}`}
-                  aria-label={`下移${details.label}模块`}
-                  disabled={disabled || index === nodes.length - 1}
-                  onClick={() => moveSibling(node.id, parentId, index, 1)}
-                >
-                  ↓ 下移
-                </button>
-                <button
-                  type="button"
-                  data-testid={`move-out-${node.id}`}
-                  disabled={disabled || parentId === null}
-                  onClick={() => moveOut(node.id, parentId)}
-                >
-                  ↖ 移出一层
-                </button>
-                <span className="humanities-text-count">
-                  {node.text.length} / {MAX_ARGUMENT_TEXT_LENGTH}
-                </span>
-              </div>
-            </div>
-            {container && (
-              <section className="humanities-cavity" aria-label={`${details.label}内部模块`}>
-                {renderNodes(node.children, node.id, depth + 1)}
-                {socket(
-                  node.id,
-                  node.children.length,
-                  `drop-inside-${node.id}`,
-                  node.children.length ? '放到容器末尾' : '放入这个容器',
-                )}
-                {!node.children.length && (
-                  <p className="humanities-cavity-hint">把内容模块或另一段逻辑放进来</p>
-                )}
-              </section>
-            )}
-            {container && <div className="humanities-container-foot" aria-hidden="true" />}
-          </article>
-        </div>
+  function zoomBy(factor: number) {
+    const box = viewportRef.current?.getBoundingClientRect()
+    if (!box) return
+    const old = canvas.viewport,
+      zoom = Math.max(0.15, Math.min(2, old.zoom * factor))
+    commit(
+      {
+        ...document,
+        canvas: {
+          ...canvas,
+          viewport: {
+            zoom,
+            x: boundArgumentCoordinate(box.width / 2 - ((box.width / 2 - old.x) * zoom) / old.zoom),
+            y: boundArgumentCoordinate(
+              box.height / 2 - ((box.height / 2 - old.y) * zoom) / old.zoom,
+            ),
+          },
+        },
+      },
+      '',
+      false,
+    )
+  }
+  function fit() {
+    const box = viewportRef.current?.getBoundingClientRect()
+    if (!box || !flat.length) return
+    const positions = Object.values(canvas.positions)
+    const minX = Math.min(...positions.map((p) => p.x)),
+      minY = Math.min(...positions.map((p) => p.y))
+    const width = Math.max(...positions.map((p) => p.x + 224)) - minX,
+      height = Math.max(...positions.map((p) => p.y + 160)) - minY
+    const zoom = Math.max(0.15, Math.min(1, (box.width - 40) / width, (box.height - 40) / height))
+    commit(
+      {
+        ...document,
+        canvas: {
+          ...canvas,
+          viewport: {
+            zoom,
+            x: boundArgumentCoordinate((box.width - width * zoom) / 2 - minX * zoom),
+            y: boundArgumentCoordinate((box.height - height * zoom) / 2 - minY * zoom),
+          },
+        },
+      },
+      '已缩放到全部模块。',
+      false,
+    )
+  }
+  function reorder(direction: -1 | 1) {
+    if (!selected) return
+    attempt(() =>
+      commitRoots(
+        moveArgumentNode(
+          roots,
+          selected.node.id,
+          selected.parentId,
+          selected.index + (direction === 1 ? 2 : -1),
+        ),
+        '成文顺序已调整，画布位置不变。',
+      ),
+    )
+  }
+  function reparent(parentId: string | null) {
+    if (!selected) return
+    const siblings = parentId ? locate(roots, parentId)?.node.children : roots
+    if (siblings)
+      attempt(() =>
+        commitRoots(
+          moveArgumentNode(roots, selected.node.id, parentId, siblings.length),
+          '逻辑连接已更新，画布位置不变。',
+        ),
       )
-    })
   }
-
   function appendTemplate() {
     attempt(() => {
       let next = roots
-      for (const node of makeTemplate(template))
-        next = insertArgumentNode(next, node, null, next.length)
-      commit(next, '已添加空白结构，请用本题的依据填写。')
+      const added = makeTemplate(template)
+      for (const node of added) next = insertArgumentNode(next, node, null, next.length)
+      const nextCanvas = argumentCanvas({ ...document, roots: next })
+      const origin = centerPoint()
+      flattenArgument(added).forEach(({ node }, index) => {
+        nextCanvas.positions[node.id] = {
+          x: boundArgumentCoordinate(origin.x + (index % 3) * 260),
+          y: boundArgumentCoordinate(origin.y + Math.floor(index / 3) * 180),
+        }
+      })
+      commit(
+        { ...document, roots: next, canvas: nextCanvas },
+        '已添加空白结构；每个模块都可独立自由移动。',
+      )
+    })
+  }
+  function selectReviewTarget(nodeId: string, span?: { start: number; end: number }) {
+    revealNode(nodeId)
+    requestAnimationFrame(() => {
+      const field = window.document.getElementById(`${id}-text-${nodeId}`)
+      if (field instanceof HTMLTextAreaElement) {
+        field.focus({ preventScroll: true })
+        if (span) field.setSelectionRange(span.start, span.end)
+      }
+    })
+  }
+  function acceptSuggestion(suggestion: ModuleReviewSuggestion): { ok: boolean; message?: string } {
+    if (disabled) return { ok: false, message: '当前正在提交，请稍后再修改模块。' }
+    try {
+      const edited = applyModuleSuggestion(document, suggestion)
+      const next = checkpointAcceptedEdit(
+        document,
+        edited.roots,
+        `接受建议：${suggestion.reason.slice(0, 55)}`,
+      )
+      commit(next, '已接受此项修改并记录版本；最终正文未改变。')
+      return { ok: true }
+    } catch (cause) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : '无法应用建议，请重新审阅。',
+      }
+    }
+  }
+  function saveCheckpoint(label: string) {
+    attempt(() =>
+      commit(checkpointArgument(document, { label, source: 'manual' }), '检查点已保存。', false),
+    )
+  }
+  function restoreCheckpoint(revisionId: string) {
+    attempt(() => {
+      const saved = hasArgumentDraftChanges(document)
+        ? checkpointArgument(document, { label: '恢复前保留的修改', source: 'manual' })
+        : document
+      commit(restoreArgumentRevision(saved, revisionId), '模块版本已恢复，原分支与最终正文保留。')
+      setSelection(null)
     })
   }
 
-  function syncText() {
+  function syncText(confirm = false) {
     if (disabled || !generated.trim()) return
-    if (draft.text.trim() && draft.text !== generated) {
+    if (!confirm && draft.text.trim() && draft.text !== generated) {
       setSyncConfirmation({ generated, previous: draft.text })
       return
     }
-    onChange({ ...draft, argument: { version: 1, roots }, text: generated })
-    setAnnouncement('已用模块更新正文。后续编辑模块不会自动改动正文。')
-    setSyncConfirmation(null)
-  }
-
-  function confirmSync() {
-    if (disabled || !syncConfirmation) return
-    if (syncConfirmation.generated !== generated || syncConfirmation.previous !== draft.text) {
-      setError('内容已变化，请重新预览后更新正文。')
-      setSyncConfirmation(null)
+    if (
+      confirm &&
+      (!syncConfirmation ||
+        syncConfirmation.generated !== generated ||
+        syncConfirmation.previous !== draft.text)
+    )
       return
-    }
-    onChange({ ...draft, argument: { version: 1, roots }, text: generated })
-    setAnnouncement('正文已替换为当前模块生成的文字。')
+    onChange({ ...draft, argument: document, text: generated })
     setSyncConfirmation(null)
+    setAnnouncement('已用模块更新正文。后续编辑模块不会自动改动正文。')
   }
 
   return (
     <section
-      className="humanities-composer"
+      className="humanities-composer free-composer"
       data-testid="humanities-composer"
       aria-labelledby={`${id}-heading`}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           setSelection(null)
-          setHoveredSocket(null)
           setSyncConfirmation(null)
-          setAnnouncement('已取消当前选择。')
+        }
+        if (
+          (event.ctrlKey || event.metaKey) &&
+          event.key.toLowerCase() === 'z' &&
+          !(event.target instanceof Element && event.target.closest('textarea,input'))
+        ) {
+          event.preventDefault()
+          event.shiftKey ? redo() : undo()
         }
       }}
     >
       <header className="humanities-heading">
         <div>
-          <span className="humanities-eyebrow">THINK · CONNECT · EXPRESS</span>
-          <h3 id={`${id}-heading`}>{info.name}论证组装台</h3>
+          <h3 id={`${id}-heading`}>{info.name}自由论证画布</h3>
           <p>{info.hint}</p>
         </div>
         <span className="humanities-count">
-          {total} / {MAX_ARGUMENT_NODES} 模块
+          {flat.length} / {MAX_ARGUMENT_NODES} 模块
         </span>
       </header>
-      <p className="humanities-instruction">
-        拖入彩色模块，在亮起的卡槽松开即可连接。也可先点模块，再点卡槽；支持键盘 Tab / Enter。
-      </p>
       {conversion.error ? (
-        <div className="humanities-migration-error" role="alert">
+        <div role="alert">
           <strong>旧草稿暂时无法转换：{conversion.error}</strong>
-          <p>原正文和旧模块仍保留。可继续在正文中作答，或新建空白组装结构。</p>
-          <details>
-            <summary>查看保留的旧模块</summary>
-            {draft.blocks.map((block) => (
-              <p key={block.id}>
-                <strong>{block.label}：</strong>
-                {block.text}
-              </p>
-            ))}
-          </details>
+          <p>原正文和旧模块仍保留。</p>
           <button
             type="button"
             disabled={disabled}
-            onClick={() => attempt(() => commit([], '已新建空白组装结构，原正文与旧模块仍保留。'))}
+            onClick={() => attempt(() => commitRoots([], '已新建空白结构，原正文和旧模块仍保留。'))}
           >
             新建空白组装结构
           </button>
         </div>
       ) : (
-        <div className="humanities-layout">
-          <aside className="humanities-palette" aria-labelledby={`${id}-palette`}>
-            <h4 id={`${id}-palette`}>空白模块库</h4>
-            <p>只给思路结构，内容由你填写。</p>
-            <span className="humanities-palette-label">内容模块</span>
-            {[LEAVES, CONTAINERS].map((group, groupIndex) => (
-              <div className="humanities-palette-group" key={groupIndex}>
-                {groupIndex === 1 && (
-                  <span className="humanities-palette-label">逻辑容器 · 可放入子模块</span>
-                )}
-                {group.map((kind) => (
-                  <button
-                    key={kind}
-                    type="button"
-                    className={`humanities-palette-block humanities-kind-${kind}${isArgumentContainer(kind) ? ' is-container' : ''}`}
-                    data-testid={`palette-${kind}`}
-                    draggable={!disabled && !atLimit}
-                    disabled={disabled || atLimit}
-                    aria-pressed={selection?.type === 'new' && selection.kind === kind}
-                    onDragStart={(event) => startDrag(event, { type: 'new', kind })}
-                    onDragEnd={endDrag}
-                    onClick={() => select({ type: 'new', kind })}
-                  >
-                    <span className="humanities-palette-grip" aria-hidden="true">
-                      ⠿
-                    </span>
-                    <span>
-                      {info.blocks[kind].label}
-                      <small>
-                        {kind === 'cause'
-                          ? '原因 → 过程 → 结果'
-                          : kind === 'contrast'
-                            ? '比较不同对象或维度'
-                            : kind === 'point'
-                              ? '让一段论证成为整体'
-                              : '填写自己的内容'}
-                      </small>
-                    </span>
-                    <span aria-hidden="true">＋</span>
-                  </button>
-                ))}
-              </div>
+        <>
+          <div className="free-palette" aria-label="空白模块库">
+            {[...LEAVES, ...CONTAINERS].map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                className={`humanities-kind-${kind} free-palette-block`}
+                data-testid={`palette-${kind}`}
+                draggable={!disabled && !atLimit}
+                disabled={disabled || atLimit}
+                aria-pressed={selection?.type === 'new' && selection.kind === kind}
+                onDragStart={(event) => startPaletteDrag(event, kind)}
+                onDragEnd={() => {
+                  activeDrag.current = null
+                }}
+                onClick={() => {
+                  setSelection({ type: 'new', kind })
+                  setAnnouncement('点击画布任意位置放置，或按“放到视野中央”。')
+                }}
+              >
+                ＋ {info.blocks[kind].label}
+              </button>
             ))}
-            <div className="humanities-template">
-              <label htmlFor={`${id}-template`}>从空白结构开始</label>
+            <details className="free-template">
+              <summary>空白结构</summary>
+              <label htmlFor={`${id}-template`}>选择结构</label>
               <select
                 id={`${id}-template`}
                 data-testid="argument-template"
@@ -614,10 +682,10 @@ export function HumanitiesComposer({
                 disabled={disabled || atLimit}
                 onChange={(event) => setTemplate(event.target.value as Template)}
               >
-                <option value="argument">完整论证 · 观点到结论</option>
-                <option value="cause">因果分析 · 原因到结果</option>
-                <option value="contrast">对比分析 · 两个对象</option>
-                <option value="points">分点作答 · 两段论证</option>
+                <option value="argument">完整论证</option>
+                <option value="cause">因果分析</option>
+                <option value="contrast">对比分析</option>
+                <option value="points">分点作答</option>
               </select>
               <button
                 type="button"
@@ -627,82 +695,340 @@ export function HumanitiesComposer({
               >
                 ＋ 添加空白结构
               </button>
-              <small>追加到末尾，已有内容会保留。</small>
-            </div>
-          </aside>
-
-          <section className="humanities-workspace" aria-labelledby={`${id}-canvas-heading`}>
-            <header className="humanities-workspace-heading">
-              <h4 id={`${id}-canvas-heading`}>我的论证结构</h4>
+            </details>
+          </div>
+          <div className="free-toolbar" role="toolbar" aria-label="画布工具">
+            <button
+              type="button"
+              disabled={disabled || !history.length}
+              data-testid="undo-argument"
+              onClick={undo}
+            >
+              ↶ 撤销
+            </button>
+            <button type="button" disabled={disabled || !future.length} onClick={redo}>
+              ↷ 重做
+            </button>
+            <button
+              type="button"
+              aria-label="缩小画布"
+              disabled={disabled || canvas.viewport.zoom <= 0.15}
+              onClick={() => zoomBy(1 / 1.2)}
+            >
+              −
+            </button>
+            <output aria-label="画布缩放">{Math.round(canvas.viewport.zoom * 100)}%</output>
+            <button
+              type="button"
+              aria-label="放大画布"
+              disabled={disabled || canvas.viewport.zoom >= 2}
+              onClick={() => zoomBy(1.2)}
+            >
+              ＋
+            </button>
+            <button type="button" disabled={disabled || !flat.length} onClick={fit}>
+              适应全部
+            </button>
+            <button type="button" aria-pressed={expanded} onClick={() => setExpanded(!expanded)}>
+              {expanded ? '收起画布' : '展开画布'}
+            </button>
+            {selection?.type === 'new' && (
               <button
                 type="button"
-                data-testid="undo-remove"
-                disabled={disabled || !removed}
-                onClick={undoRemove}
+                disabled={disabled}
+                data-testid="place-center"
+                onClick={placeAtCenter}
               >
-                ↶ 撤销移除
+                放到视野中央
               </button>
-            </header>
-            <div className={`humanities-selection${selection ? ' has-selection' : ''}`}>
-              <span>
-                {selection
-                  ? `已选择「${selectedLabel}」：点击卡槽放置`
-                  : `可逐层嵌套，最多 ${MAX_ARGUMENT_DEPTH} 层；正文须单独更新。`}
-              </span>
-              {selection && (
-                <button
-                  type="button"
+            )}
+          </div>
+          <p className="free-help">
+            {selection?.type === 'new'
+              ? `已选「${info.blocks[selection.kind].label}」，点击任意空白处放置。`
+              : '拖动模块标题可自由摆放，拖动空白处平移；标题聚焦后方向键移动，Shift 微调。'}{' '}
+            位置不影响成文顺序。
+          </p>
+          <div
+            ref={viewportRef}
+            className={`free-canvas${expanded ? ' is-expanded' : ''}`}
+            data-testid="argument-canvas"
+            tabIndex={0}
+            aria-label="自由论证画布，拖动空白处平移，方向键平移"
+            onDragOver={(event) => {
+              if (!disabled && event.dataTransfer.types.includes(DRAG_TYPE)) event.preventDefault()
+            }}
+            onDrop={drop}
+            onPointerDown={(event) => {
+              if (!(event.target instanceof Element && event.target.closest('.free-node')))
+                startGesture(event)
+            }}
+            onPointerMove={moveGesture}
+            onPointerUp={(event) => finishGesture(event)}
+            onPointerCancel={(event) => finishGesture(event, true)}
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget || disabled) return
+              const deltas: Record<string, [number, number]> = {
+                ArrowLeft: [40, 0],
+                ArrowRight: [-40, 0],
+                ArrowUp: [0, 40],
+                ArrowDown: [0, -40],
+              }
+              if (deltas[event.key]) {
+                event.preventDefault()
+                const [x, y] = deltas[event.key]
+                commit(
+                  {
+                    ...document,
+                    canvas: {
+                      ...canvas,
+                      viewport: {
+                        ...canvas.viewport,
+                        x: boundArgumentCoordinate(canvas.viewport.x + x),
+                        y: boundArgumentCoordinate(canvas.viewport.y + y),
+                      },
+                    },
+                  },
+                  '',
+                  false,
+                )
+              }
+            }}
+          >
+            {!flat.length && (
+              <div className="free-empty">
+                把模块拖到这里的任意位置
+                <br />
+                <small>也可点选模块，再点画布；成文关系单独设置。</small>
+              </div>
+            )}
+            <div
+              className="free-world"
+              style={{
+                transform: `translate(${canvas.viewport.x}px, ${canvas.viewport.y}px) scale(${canvas.viewport.zoom})`,
+              }}
+            >
+              <svg className="free-connections" aria-hidden="true">
+                <defs>
+                  <marker
+                    id={`${id}-arrow`}
+                    viewBox="0 0 10 10"
+                    refX="9"
+                    refY="5"
+                    markerWidth="6"
+                    markerHeight="6"
+                    orient="auto-start-reverse"
+                  >
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
+                  </marker>
+                </defs>
+                {flat
+                  .filter((item) => item.parentId)
+                  .map(({ node, parentId }) => {
+                    const from = canvas.positions[parentId!],
+                      to = canvas.positions[node.id]
+                    return (
+                      <path
+                        key={node.id}
+                        d={`M ${from.x + 224} ${from.y + 30} C ${from.x + 264} ${from.y + 30}, ${to.x - 40} ${to.y + 30}, ${to.x} ${to.y + 30}`}
+                        markerEnd={`url(#${id}-arrow)`}
+                      />
+                    )
+                  })}
+              </svg>
+              {flat.map(({ node, path, parentId }) => {
+                const position = canvas.positions[node.id]
+                const details = info.blocks[node.kind]
+                return (
+                  <article
+                    key={node.id}
+                    className={`free-node humanities-kind-${node.kind}${selected?.node.id === node.id ? ' is-selected' : ''}`}
+                    style={{ left: position.x, top: position.y }}
+                    data-testid={`block-${node.id}`}
+                    data-block-id={node.id}
+                    data-block-kind={node.kind}
+                    data-parent-id={parentId ?? ''}
+                    data-x={position.x}
+                    data-y={position.y}
+                    aria-label={`${details.label}模块，成文序号 ${path}`}
+                    onClick={() => setSelection({ type: 'move', id: node.id })}
+                  >
+                    <header>
+                      <button
+                        type="button"
+                        className="free-drag-handle"
+                        data-testid={`drag-${node.id}`}
+                        disabled={disabled}
+                        aria-label={`移动${details.label}模块，方向键调整位置`}
+                        aria-pressed={selected?.node.id === node.id}
+                        onPointerDown={(event) => startGesture(event, node.id)}
+                        onKeyDown={(event) => {
+                          const deltas: Record<string, [number, number]> = {
+                            ArrowLeft: [-1, 0],
+                            ArrowRight: [1, 0],
+                            ArrowUp: [0, -1],
+                            ArrowDown: [0, 1],
+                          }
+                          if (deltas[event.key] && !disabled) {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            const [x, y] = deltas[event.key],
+                              step = event.shiftKey ? 1 : 10
+                            attempt(() =>
+                              commit(
+                                positionArgumentNode(document, node.id, {
+                                  x: position.x + x * step,
+                                  y: position.y + y * step,
+                                }),
+                                '位置已调整，成文顺序不变。',
+                              ),
+                            )
+                          }
+                        }}
+                        onClick={() => setSelection({ type: 'move', id: node.id })}
+                      >
+                        ⠿ {details.label} <small>{path}</small>
+                      </button>
+                      <button
+                        type="button"
+                        className="free-remove"
+                        data-testid={`remove-${node.id}`}
+                        aria-label={`移除${details.label}模块及子模块`}
+                        disabled={disabled}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          attempt(() => {
+                            commitRoots(
+                              removeArgumentNode(roots, node.id),
+                              '已移除模块及逻辑子模块，可撤销。',
+                            )
+                            setSelection(null)
+                          })
+                        }}
+                      >
+                        ×
+                      </button>
+                    </header>
+                    <label className="humanities-sr-only" htmlFor={`${id}-text-${node.id}`}>
+                      {details.label}内容
+                    </label>
+                    <textarea
+                      id={`${id}-text-${node.id}`}
+                      data-testid={`text-${node.id}`}
+                      data-advisor-source={node.kind === 'material' ? 'material' : 'argument'}
+                      value={node.text}
+                      placeholder={details.prompt}
+                      rows={2}
+                      maxLength={MAX_ARGUMENT_TEXT_LENGTH}
+                      disabled={disabled}
+                      onFocus={() => setSelection({ type: 'move', id: node.id })}
+                      onChange={(event) =>
+                        attempt(() => commitRoots(updateText(roots, node.id, event.target.value)))
+                      }
+                    />
+                    <footer>
+                      {parentId
+                        ? `属于 ${flat.find((item) => item.node.id === parentId)?.path}`
+                        : '主序列'}
+                      {isArgumentContainer(node.kind)
+                        ? ` · ${node.children.length} 个逻辑子模块`
+                        : ''}
+                    </footer>
+                  </article>
+                )
+              })}
+            </div>
+          </div>
+          {selected && (
+            <div className="free-inspector" aria-label="所选模块逻辑关系">
+              <strong>
+                {info.blocks[selected.node.kind].label} · {selected.path}
+              </strong>
+              <label>
+                逻辑归属
+                <select
+                  data-testid="argument-parent"
+                  value={selected.parentId ?? ''}
                   disabled={disabled}
-                  onClick={() => {
-                    setSelection(null)
-                    setHoveredSocket(null)
-                  }}
+                  onChange={(event) => reparent(event.target.value || null)}
                 >
-                  取消
-                </button>
-              )}
+                  <option value="">答案主序列</option>
+                  {flat
+                    .filter(
+                      ({ node }) =>
+                        isArgumentContainer(node.kind) &&
+                        node.id !== selected.node.id &&
+                        !locate(selected.node.children, node.id),
+                    )
+                    .map(({ node, path }) => (
+                      <option key={node.id} value={node.id}>
+                        {path} · {info.blocks[node.kind].label} {node.text.slice(0, 16)}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                data-testid={`move-up-${selected.node.id}`}
+                disabled={disabled || selected.index === 0}
+                onClick={() => reorder(-1)}
+              >
+                成文提前
+              </button>
+              <button
+                type="button"
+                data-testid={`move-down-${selected.node.id}`}
+                disabled={
+                  disabled ||
+                  selected.index >=
+                    (selected.parentId
+                      ? locate(roots, selected.parentId)!.node.children.length
+                      : roots.length) -
+                      1
+                }
+                onClick={() => reorder(1)}
+              >
+                成文延后
+              </button>
+              <small>逻辑归属与顺序单独设置，不吸附、不限制位置。</small>
             </div>
-            <div className="humanities-canvas" data-testid="argument-canvas">
-              {!roots.length && (
-                <div className="humanities-empty">
-                  <span aria-hidden="true">
-                    ▰<br />└ ▰
+          )}
+          <details className="free-outline">
+            <summary>成文顺序与逻辑连接（{flat.length} 个模块）</summary>
+            <ol>
+              {flat.map(({ node, parentId, path }) => (
+                <li key={node.id}>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    aria-pressed={selected?.node.id === node.id}
+                    data-testid={`select-${node.id}`}
+                    onClick={() => revealNode(node.id)}
+                  >
+                    {path} · {info.blocks[node.kind].label} {node.text.slice(0, 36) || '（空白）'}
+                  </button>
+                  <span>
+                    {parentId
+                      ? `连接到 ${flat.find((item) => item.node.id === parentId)?.path}`
+                      : '主序列'}
                   </span>
-                  <strong>先搭思路，再写答案</strong>
-                  <p>
-                    从左侧拖入一个空白模块，
-                    <br />
-                    或添加一套空白结构。
-                  </p>
-                </div>
-              )}
-              {renderNodes(roots)}
-              {socket(
-                null,
-                roots.length,
-                'drop-root',
-                roots.length ? '放到答案末尾' : '放入第一个模块',
-              )}
-            </div>
-          </section>
-        </div>
+                </li>
+              ))}
+            </ol>
+          </details>
+        </>
       )}
       {(error || atLimit) && (
         <p className="humanities-error" role="alert">
-          {error || `已达到 ${MAX_ARGUMENT_NODES} 个模块上限，请先合并或移除模块。`}
+          {error || `已达到 ${MAX_ARGUMENT_NODES} 个模块上限。`}
         </p>
       )}
       <div className="humanities-announcement" role="status" aria-live="polite">
         {announcement}
       </div>
-      <section className="humanities-preview" aria-labelledby={`${id}-preview-heading`}>
-        <header>
-          <div>
-            <h4 id={`${id}-preview-heading`}>成文预览</h4>
-            <p>按当前结构生成。请检查连接词、逻辑与事实；组装完成不代表答案正确。</p>
-          </div>
-          <span>{generated.length} 字符</span>
-        </header>
+      <details className="free-preview">
+        <summary>成文预览 · {generated.length} 字符</summary>
+        <p>按逻辑顺序生成，与画布位置无关。请检查连接词、逻辑和事实。</p>
         <label className="humanities-sr-only" htmlFor={`${id}-preview`}>
           模块生成文字预览
         </label>
@@ -711,55 +1037,72 @@ export function HumanitiesComposer({
           data-testid="argument-preview"
           value={generated}
           readOnly
-          rows={5}
+          rows={4}
           placeholder="填写模块后，这里会按你的论证顺序生成文字。"
         />
-        <div className="humanities-sync-row">
-          <p>手写正文独立保留，编辑或移动模块不会自动覆盖。</p>
+      </details>
+      <div className="humanities-sync-row">
+        <p>正文独立保留，移动模块不会自动覆盖。</p>
+        <button
+          type="button"
+          className="primary"
+          data-testid="sync-argument"
+          disabled={disabled || !generated.trim() || !!conversion.error}
+          onClick={() => syncText()}
+        >
+          用模块更新正文
+        </button>
+      </div>
+      {!conversion.error && (
+        <>
+          {question && api && (
+            <ModuleReviewPanel
+              disabled={disabled}
+              document={document}
+              question={question}
+              config={config ?? null}
+              api={api}
+              selectedNodeId={selected?.node.id}
+              onSelect={selectReviewTarget}
+              onApply={acceptSuggestion}
+            />
+          )}
+          <ArgumentTimeline
+            document={document}
+            disabled={disabled}
+            onCheckpoint={saveCheckpoint}
+            onRestore={restoreCheckpoint}
+          />
+        </>
+      )}
+      {syncConfirmation && (
+        <div
+          className="humanities-sync-confirmation"
+          role="alertdialog"
+          aria-labelledby={`${id}-confirm-heading`}
+        >
+          <strong id={`${id}-confirm-heading`}>替换已有正文？</strong>
+          <p>继续会用模块预览完整替换正文，手动修改将被覆盖。</p>
           <button
             type="button"
-            className="primary"
-            data-testid="sync-argument"
-            disabled={disabled || !generated.trim() || !!conversion.error}
-            onClick={syncText}
+            data-testid="cancel-sync"
+            autoFocus
+            disabled={disabled}
+            onClick={() => setSyncConfirmation(null)}
           >
-            用模块更新正文
+            保留原正文
+          </button>
+          <button
+            type="button"
+            data-testid="confirm-sync"
+            className="primary"
+            disabled={disabled}
+            onClick={() => syncText(true)}
+          >
+            确认替换正文
           </button>
         </div>
-        {syncConfirmation && (
-          <div
-            className="humanities-sync-confirmation"
-            role="alertdialog"
-            aria-labelledby={`${id}-confirm-heading`}
-            aria-describedby={`${id}-confirm-detail`}
-          >
-            <strong id={`${id}-confirm-heading`}>替换已有正文？</strong>
-            <p id={`${id}-confirm-detail`}>
-              正文中已有不同的内容。继续会用上方预览完整替换正文，手动修改将被覆盖。
-            </p>
-            <div>
-              <button
-                type="button"
-                data-testid="cancel-sync"
-                autoFocus
-                disabled={disabled}
-                onClick={() => setSyncConfirmation(null)}
-              >
-                保留原正文
-              </button>
-              <button
-                type="button"
-                data-testid="confirm-sync"
-                className="primary"
-                disabled={disabled}
-                onClick={confirmSync}
-              >
-                确认替换正文
-              </button>
-            </div>
-          </div>
-        )}
-      </section>
+      )}
     </section>
   )
 }
