@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AnswerDraft, Attempt, Capabilities, Question, StudyState } from './shared/types'
 import { emptyDraft } from './shared/types'
+import { subjects, subjectLabel, kindLabel, subjectGuidance } from './shared/subjects'
 import { PoliticsComposer } from './components/PoliticsComposer'
 import { GeographyWorkbench } from './components/GeographyWorkbench'
 
 type View = 'practice' | 'politics' | 'geography' | 'history' | 'adapters'
-const kindLabel = { choice: '单项选择', politics: '模块论证', geography: '绘图探究' }
-const subjectLabel = { politics: '思想政治', geography: '地理' }
 const navigation: { id: View; icon: string; label: string; caption: string }[] = [
   { id: 'practice', icon: '▤', label: '题目练习', caption: 'Practice' },
   { id: 'politics', icon: '▦', label: '政治组装', caption: 'Argument builder' },
@@ -258,11 +257,13 @@ export default function App() {
   const canSubmit =
     selected?.kind === 'choice'
       ? Boolean(draft.choiceId)
-      : Boolean(
-          draft.text.trim() ||
-          draft.blocks.some((b) => b.text.trim()) ||
-          draft.drawing.points.length,
-        )
+      : selected && ['chinese', 'math', 'english', 'history'].includes(selected.kind)
+        ? Boolean(draft.text.trim())
+        : Boolean(
+            draft.text.trim() ||
+            draft.blocks.some((b) => b.text.trim()) ||
+            draft.drawing.points.length,
+          )
   const focusedHistory = state.attempts.find((a) => a.id === historyId)
 
   return (
@@ -432,8 +433,9 @@ export default function App() {
                     <div className="subject-filters" aria-label="按学科筛选">
                       {[
                         ['all', '全部'],
-                        ['politics', '政治'],
-                        ['geography', '地理'],
+                        ...subjects
+                          .filter((id) => view === 'practice' || id === view)
+                          .map((id) => [id, id === 'politics' ? '政治' : subjectLabel[id]]),
                       ].map(([id, label]) => (
                         <button
                           key={id}
@@ -591,7 +593,9 @@ export default function App() {
                                 />
                               )}
                               <label className="thinking-label" htmlFor="answer-text">
-                                {selected.kind === 'choice' ? '思考笔记' : '文字说明与补充'}
+                                {selected.kind === 'choice'
+                                  ? '思考笔记'
+                                  : subjectGuidance[selected.subject].label}
                                 <span>
                                   {selected.kind === 'choice'
                                     ? '可选 · 记录你选择的理由'
@@ -600,20 +604,30 @@ export default function App() {
                               </label>
                               <textarea
                                 id="answer-text"
-                                rows={selected.kind === 'choice' ? 3 : 4}
+                                rows={selected.kind === 'choice' ? 3 : 8}
+                                lang={selected.subject === 'english' ? 'en' : 'zh-CN'}
                                 value={draft.text}
                                 disabled={busy}
                                 maxLength={20000}
                                 placeholder={
                                   selected.kind === 'choice'
                                     ? '为什么选这一项？其他选项的问题在哪里？'
-                                    : '写下你的分析、材料依据与结论…'
+                                    : subjectGuidance[selected.subject].placeholder
                                 }
                                 onChange={(e) => updateDraft({ ...draft, text: e.target.value })}
                               />
+                              {selected.subject === 'english' && selected.kind !== 'choice' && (
+                                <p className="muted" aria-live="polite">
+                                  词数参考：
+                                  {draft.text.match(/[A-Za-z]+(?:['’-][A-Za-z]+)*/g)?.length ??
+                                    0}{' '}
+                                  words
+                                </p>
+                              )}
                               {provider === 'local' && selected.kind !== 'choice' && (
                                 <div className="notice compact">
-                                  本地审阅按关键词检查要点，仅供学习自查。绘图会随答案保存，暂不自动判断图形含义。
+                                  本地审阅按关键词检查要点，仅供学习自查。
+                                  {subjectGuidance[selected.subject].local}
                                 </div>
                               )}
                               <fieldset className="review-settings" disabled={busy}>
@@ -817,7 +831,7 @@ export default function App() {
                     <p>{capabilities?.questionBank}</p>
                     <div className="adapter-detail">
                       通过 JSON
-                      导入选择题、政治模块题、地理探究题。导入时会校验字段、重复编号、分值和答案。
+                      导入六科选择题、语文阅读表达、数学解答、英语读写、历史史料分析、政治模块题和地理探究题。导入时会校验字段、重复编号、分值和答案。
                     </div>
                     <button className="primary" disabled={busy} onClick={importBank}>
                       导入 JSON 题库

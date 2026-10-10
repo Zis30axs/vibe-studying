@@ -460,13 +460,15 @@ small {
 }
 .subject-filters {
   display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
   background: #f2f5f6;
   border-radius: 6px;
   padding: 3px;
   margin: 13px 16px 14px;
 }
 .subject-filters button {
-  flex: 1;
+  flex: 1 0 20%;
   border: 0;
   padding: 5px;
   font-size: 10px;

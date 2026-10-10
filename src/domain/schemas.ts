@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { subjects } from '../shared/subjects'
 import type { AnswerDraft, Question, StudyState } from '../shared/types'
 
 export const idSchema = z
@@ -11,7 +12,7 @@ export const idSchema = z
     '保留标识符不可使用',
   )
 const shortText = z.string().trim().min(1).max(200)
-export const subjectSchema = z.enum(['politics', 'geography'])
+export const subjectSchema = z.enum(subjects)
 export const blockSchema = z.strictObject({
   id: idSchema,
   category: z.enum(['principle', 'material', 'analysis', 'conclusion']),
@@ -31,7 +32,7 @@ export const questionSchema = z
   .strictObject({
     id: idSchema,
     subject: subjectSchema,
-    kind: z.enum(['choice', 'politics', 'geography']),
+    kind: z.enum(['choice', ...subjects]),
     title: shortText,
     prompt: z.string().trim().min(1).max(20000),
     source: shortText,
@@ -181,6 +182,12 @@ export function validateAnswer(
     !draft.drawing.points.length
   )
     throw new Error('请先填写答案或绘图')
+  if (
+    submitting &&
+    ['chinese', 'math', 'english', 'history'].includes(question.kind) &&
+    !draft.text.trim()
+  )
+    throw new Error('请先填写文字答案')
   return draft
 }
 

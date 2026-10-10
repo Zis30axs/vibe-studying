@@ -24,7 +24,7 @@ describe('offline study lifecycle', () => {
 
   it('lists original examples, saves a draft, grades exact choices and reloads attempts after restart', async () => {
     const questions = await bank.list()
-    expect(questions).toHaveLength(6)
+    expect(questions).toHaveLength(sampleQuestions.length)
     expect(questions.every((question) => question.source.includes('非历年真题'))).toBe(true)
     const question = questions.find((item) => item.id === 'pol-choice-1')!
     const draft = { ...emptyDraft(), choiceId: 'A' }
@@ -83,7 +83,7 @@ describe('offline study lifecycle', () => {
     await expect(
       bank.importBank({ version: 1, questions: [{ ...question, id: 'would-be-new' }, question] }),
     ).rejects.toThrow('ID 已存在')
-    expect(await bank.list()).toHaveLength(7)
+    expect(await bank.list()).toHaveLength(sampleQuestions.length + 1)
     await expect(bank.get('would-be-new')).rejects.toThrow()
     await expect(
       bank.importBank({
@@ -97,7 +97,7 @@ describe('offline study lifecycle', () => {
     const input = { version: 1, questions: [{ ...sampleQuestions[0], id: 'concurrent-import' }] }
     const results = await Promise.allSettled([bank.importBank(input), bank.importBank(input)])
     expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected'])
-    expect(await bank.list()).toHaveLength(7)
+    expect(await bank.list()).toHaveLength(sampleQuestions.length + 1)
   })
 
   it('enforces the combined bundled and imported bank limit before writing', async () => {
@@ -106,7 +106,7 @@ describe('offline study lifecycle', () => {
       id: `overflow-${index}`,
     }))
     await expect(bank.importBank({ version: 1, questions })).rejects.toThrow()
-    expect(await bank.list()).toHaveLength(6)
+    expect(await bank.list()).toHaveLength(sampleQuestions.length)
   })
 
   it('preserves assembled blocks and drawing snapshots; labels grading limitations honestly', async () => {

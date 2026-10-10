@@ -1,4 +1,5 @@
 import { questionBankSchema } from './schemas'
+import { extraSampleQuestions } from './extra-sample-questions'
 
 export const SAMPLE_SOURCE = 'ExamCraft 原创示例 · 非历年真题'
 export const sampleQuestions = questionBankSchema.parse({
@@ -165,5 +166,6 @@ export const sampleQuestions = questionBankSchema.parse({
       explanation:
         'A 的坐标为（20，30），B 为（40，50）。两点均在东经、北纬范围内，B 的经度和纬度都更大，因此位于 A 的东北方向。请自行核对图上的点和连线；本地规则未对绘图评分。',
     },
+    ...extraSampleQuestions,
   ],
 }).questions

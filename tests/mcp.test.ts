@@ -84,3 +84,58 @@ describe('real MCP stdio client/server', () => {
     expect(invalid.isError).toBe(true)
   })
 })
+
+describe('new subjects over real MCP stdio', () => {
+  let directory: string
+  let output: string
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), 'examcraft-mcp-subjects-'))
+    output = join(directory, 'server.cjs')
+    await build({
+      entryPoints: [resolve('mcp/server.ts')],
+      outfile: output,
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      logLevel: 'silent',
+    })
+  }, 30000)
+  afterAll(async () => {
+    if (directory) await rm(directory, { recursive: true, force: true })
+  })
+  it.each(['chinese', 'math', 'english', 'history'] as const)(
+    '%s supports list/get/review and cannot widen scope',
+    async (subject) => {
+      const client = new Client({ name: 'new-subject-test', version: '1.0.0' })
+      try {
+        await client.connect(
+          new StdioClientTransport({
+            command: process.execPath,
+            args: [output, '--subject', subject],
+            stderr: 'pipe',
+          }),
+        )
+        const bank = new McpQuestionBankAdapter(client)
+        const questions = await bank.list({ subject })
+        expect(questions).toHaveLength(3)
+        expect(questions.every((q) => q.subject === subject)).toBe(true)
+        expect(await bank.list({ subject: 'politics' })).toEqual([])
+        await expect(bank.get('pol-choice-1')).rejects.toThrow('MCP 工具返回错误')
+        const written = questions.find((q) => q.kind === subject)!
+        expect(await bank.get(written.id)).toEqual(written)
+        const review = await new McpAgentAdapter(client).review(written, {
+          ...emptyDraft(),
+          text: written.rubric!.map((r) => r.keywords[0]).join(' '),
+        })
+        expect(review.score).toBe(written.maxScore)
+        const forbidden = await client.callTool({
+          name: 'review_answer',
+          arguments: { questionId: 'pol-choice-1', draft: { ...emptyDraft(), choiceId: 'A' } },
+        })
+        expect(forbidden.isError).toBe(true)
+      } finally {
+        await client.close()
+      }
+    },
+  )
+})

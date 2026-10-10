@@ -1,5 +1,5 @@
-export type Subject = 'politics' | 'geography'
-export type QuestionKind = 'choice' | 'politics' | 'geography'
+export type Subject = 'chinese' | 'math' | 'english' | 'politics' | 'history' | 'geography'
+export type QuestionKind = 'choice' | Subject
 export type BlockCategory = 'principle' | 'material' | 'analysis' | 'conclusion'
 export interface AnswerBlock {
   id: string

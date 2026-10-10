@@ -1,3 +1,4 @@
+import { subjectGuidance } from '../shared/subjects'
 import type { AnswerDraft, Question } from '../shared/types'
 import { validateAnswer } from '../domain/schemas'
 import type { AgentAdapter, Review } from './contracts'
@@ -26,7 +27,14 @@ export class LocalRuleAgent implements AgentAdapter {
       .toLowerCase()
     const rubric = (question.rubric ?? []).map((item) => {
       const found = item.keywords.find((keyword) =>
-        text.includes(keyword.normalize('NFKC').toLowerCase()),
+        question.subject === 'english'
+          ? new RegExp(
+              `(?<![a-z])${keyword
+                .normalize('NFKC')
+                .toLowerCase()
+                .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`,
+            ).test(text)
+          : text.includes(keyword.normalize('NFKC').toLowerCase()),
       )
       return {
         id: item.id,
@@ -43,7 +51,7 @@ export class LocalRuleAgent implements AgentAdapter {
       maxScore: question.maxScore,
       feedback:
         '这是关键词覆盖度提示，不代表考试得分。规则不理解语义、否定或论证逻辑，也不评价模块顺序。' +
-        (question.kind === 'geography' ? '绘图已随作答保存，但未参与自动评分。' : ''),
+        subjectGuidance[question.subject].local,
       explanation: question.explanation,
       rubric,
       reviewer: this.name,

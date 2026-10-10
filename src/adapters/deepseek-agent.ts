@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { subjectGuidance } from '../shared/subjects'
 import type { AnswerDraft, Question } from '../shared/types'
 import { idSchema, questionSchema, reviewSchema, validateAnswer } from '../domain/schemas'
 import type { AgentAdapter, Review } from './contracts'
@@ -139,7 +140,10 @@ export class DeepSeekAgent implements AgentAdapter {
               max_tokens: 8192,
               response_format: { type: 'json_object' },
               messages: [
-                { role: 'system', content: SYSTEM },
+                {
+                  role: 'system',
+                  content: `${SYSTEM}\n${subjectGuidance[question.subject].review}`,
+                },
                 { role: 'user', content: JSON.stringify(data) },
               ],
             }),

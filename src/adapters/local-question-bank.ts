@@ -28,13 +28,21 @@ export class LocalQuestionBank implements QuestionBankAdapter {
       )
   }
 
+  private mergeQuestions(imported: Question[]): Question[] {
+    // Existing imports own their IDs: new demo releases must not break saved history.
+    const bundled = questionBankSchema.parse({ version: 1, questions: this.bundled }).questions
+    const importedIds = new Set(imported.map((question) => question.id))
+    const available = bundled.filter((question) => !importedIds.has(question.id))
+    return questionBankSchema.parse({
+      version: 1,
+      questions: [...available.slice(0, Math.max(0, 1000 - imported.length)), ...imported],
+    }).questions
+  }
+
   async list(input: QuestionScope = {}): Promise<Question[]> {
     const scope = scopeSchema.parse(input)
     const imported = this.store ? (await this.store.load()).questions : []
-    const questions = questionBankSchema.parse({
-      version: 1,
-      questions: [...this.bundled, ...imported],
-    }).questions
+    const questions = this.mergeQuestions(imported)
     return questions.filter((question) => matchesScope(question, scope))
   }
 
@@ -58,7 +66,7 @@ export class LocalQuestionBank implements QuestionBankAdapter {
         throw new Error(`题目 ID 已存在：${duplicate.id}。导入已取消，未覆盖任何题目。`)
       questionBankSchema.parse({
         version: 1,
-        questions: [...this.bundled, ...current.questions, ...incoming.questions],
+        questions: [...this.mergeQuestions(current.questions), ...incoming.questions],
       })
       return questionBankSchema.parse({
         version: 1,
