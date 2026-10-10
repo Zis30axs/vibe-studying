@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "questions": [
+    {
+      "id": "import-demo-geo-1",
+      "subject": "geography",
+      "kind": "choice",
+      "title": "导入示例：纬度的起点",
+      "prompt": "地理坐标中，纬度 0° 所对应的是哪条线？",
+      "source": "ExamCraft 原创导入示例 · 非历年真题",
+      "tags": ["经纬网", "导入示例"],
+      "maxScore": 4,
+      "choices": [
+        { "id": "A", "text": "赤道" },
+        { "id": "B", "text": "本初子午线" },
+        { "id": "C", "text": "北回归线" }
+      ],
+      "correctAnswer": "A",
+      "explanation": "赤道是纬度 0° 的纬线，本初子午线是经度 0° 的经线。"
+    }
+  ]
+}
