@@ -10,11 +10,23 @@ import {
 import { readFile } from 'node:fs/promises'
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { LocalQuestionBank } from '../src/adapters/local-question-bank'
+import { DeepSeekAgent } from '../src/adapters/deepseek-agent'
 import { LocalRuleAgent } from '../src/adapters/local-rule-agent'
 import { readJsonFile } from '../src/adapters/atomic-json-store'
 import { StudyService } from '../src/domain/study-service'
-import type { AnswerDraft } from '../src/shared/types'
+import type { AnswerDraft, SubmissionOptions } from '../src/shared/types'
 
+// Read only at application start; never expose credentials through IPC or to spawned renderers.
+const deepseekKey = process.env.DEEPSEEK_API_KEY
+delete process.env.DEEPSEEK_API_KEY
+let deepseek: DeepSeekAgent | undefined
+let deepseekConfigError: string | undefined
+try {
+  deepseek = new DeepSeekAgent({ apiKey: deepseekKey, model: process.env.EXAMCRAFT_DEEPSEEK_MODEL })
+} catch {
+  deepseekConfigError =
+    'DeepSeek 模型配置无效，请检查 EXAMCRAFT_DEEPSEEK_MODEL 后重启；本地模式仍可使用。'
+}
 app.setName('ExamCraft')
 if (!app.isPackaged && process.env.EXAMCRAFT_USER_DATA) {
   if (!isAbsolute(process.env.EXAMCRAFT_USER_DATA))
@@ -83,12 +95,23 @@ function registerIpc(service: StudyService, bank: LocalQuestionBank): void {
   )
   handle(
     'examcraft:submit-answer',
-    (questionId, draft) => service.submitAnswer(questionId as string, draft as AnswerDraft),
+    (questionId, draft, options) =>
+      service.submitAnswer(
+        questionId as string,
+        draft as AnswerDraft,
+        options as SubmissionOptions | undefined,
+      ),
     true,
   )
   handle('examcraft:capabilities', () => ({
     questionBank: bank.name,
     reviewer: service.agent.name,
+    deepseek: {
+      configured: deepseek?.configured ?? false,
+      model: deepseek?.model ?? '未配置',
+      endpoint: 'https://api.deepseek.com',
+      error: deepseekConfigError,
+    },
     mcp: '内置 stdio MCP：list_questions / get_question / review_answer；可限定学科、标签和题目 ID',
   }))
   handle('examcraft:import-bank', async () => {
@@ -226,7 +249,15 @@ else {
       session.defaultSession.setPermissionCheckHandler(() => false)
       await registerAppProtocol()
       const bank = new LocalQuestionBank(app.getPath('userData'))
-      registerIpc(new StudyService(app.getPath('userData'), bank, new LocalRuleAgent()), bank)
+      registerIpc(
+        new StudyService(
+          app.getPath('userData'),
+          bank,
+          new LocalRuleAgent(),
+          deepseek?.configured ? deepseek : undefined,
+        ),
+        bank,
+      )
       createWindow()
       app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow()

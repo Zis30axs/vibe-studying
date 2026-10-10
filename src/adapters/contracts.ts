@@ -12,5 +12,5 @@ export interface QuestionBankAdapter {
 }
 export interface AgentAdapter {
   readonly name: string
-  review(question: Question, draft: AnswerDraft): Promise<Review>
+  review(question: Question, draft: AnswerDraft, context?: { syllabus?: string }): Promise<Review>
 }

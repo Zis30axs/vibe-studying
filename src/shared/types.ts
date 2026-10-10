@@ -74,16 +74,26 @@ export interface StudyState {
   drafts: Record<string, AnswerDraft>
   attempts: Attempt[]
 }
+export interface SubmissionOptions {
+  provider: 'local' | 'deepseek'
+  cloudConsent?: boolean
+  syllabus?: string
+}
 export interface Capabilities {
   questionBank: string
   reviewer: string
   mcp: string
+  deepseek?: { configured: boolean; model: string; endpoint: string; error?: string }
 }
 export interface ExamCraftApi {
   listQuestions(): Promise<Question[]>
   loadState(): Promise<StudyState>
   saveDraft(questionId: string, draft: AnswerDraft): Promise<void>
-  submitAnswer(questionId: string, draft: AnswerDraft): Promise<Attempt>
+  submitAnswer(
+    questionId: string,
+    draft: AnswerDraft,
+    options?: SubmissionOptions,
+  ): Promise<Attempt>
   importQuestionBank(): Promise<{ count: number; canceled: boolean }>
   getCapabilities(): Promise<Capabilities>
 }

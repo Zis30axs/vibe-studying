@@ -41,9 +41,11 @@ function Review({ attempt, question }: { attempt: Attempt; question?: Question }
       <p className="review-feedback">{attempt.feedback}</p>
       <div className="notice">
         {attempt.reviewer} ·{' '}
-        {question?.kind === 'choice'
-          ? '按标准答案核对'
-          : '关键词规则仅供自查，不代表考试阅卷分数；图形未做语义评分。'}
+        {attempt.reviewer.toLowerCase().startsWith('deepseek')
+          ? 'AI 练习反馈可能有误，不代表官方成绩；绘图依据坐标与连线数据审阅，请核查。'
+          : question?.kind === 'choice'
+            ? '按标准答案核对，仅供练习，不代表官方成绩'
+            : '关键词规则仅供自查，不代表考试阅卷分数；图形未做语义评分。'}
       </div>
       {attempt.rubric.length > 0 && (
         <div className="rubric-list">
@@ -107,6 +109,10 @@ export default function App() {
   const [selectedId, setSelectedId] = useState('')
   const [tab, setTab] = useState<'answer' | 'review'>('answer')
   const [busy, setBusy] = useState(false)
+  const [provider, setProvider] = useState<'local' | 'deepseek'>('local')
+  const [cloudConsent, setCloudConsent] = useState(false)
+  const [syllabus, setSyllabus] = useState('')
+  const submitting = useRef(false)
   const [saveStatus, setSaveStatus] = useState('草稿自动保存到本机')
   const [message, setMessage] = useState('')
   const [historyId, setHistoryId] = useState('')
@@ -149,6 +155,10 @@ export default function App() {
   })
   const selected = filtered.find((q) => q.id === selectedId) ?? filtered[0]
   currentQuestionId.current = selected?.id
+  useEffect(() => {
+    setCloudConsent(false)
+  }, [selected?.id, provider])
+  const cloudReady = Boolean(capabilities?.deepseek?.configured)
   const draft = selected ? (state.drafts[selected.id] ?? emptyDraft()) : emptyDraft()
   const attempts = selected ? state.attempts.filter((a) => a.questionId === selected.id) : []
   const latest = attempts.at(-1)
@@ -177,6 +187,7 @@ export default function App() {
   function updateDraft(next: AnswerDraft) {
     if (!selected || !api || busy) return
     const id = selected.id
+    setCloudConsent(false)
     setState((s) => ({ ...s, drafts: { ...s.drafts, [id]: next } }))
     const seq = ++saveSequence.current
     setSaveStatus('正在保存…')
@@ -196,12 +207,20 @@ export default function App() {
       })
   }
   async function submit() {
-    if (!selected || !api || busy) return
+    if (!selected || !api || busy || submitting.current) return
+    if (provider === 'deepseek' && (!cloudReady || !cloudConsent)) {
+      setError('请先完成 DeepSeek 安全配置，并确认本次数据发送。')
+      return
+    }
+    submitting.current = true
     setBusy(true)
     setError('')
     setMessage('')
     try {
-      const attempt = await api.submitAnswer(selected.id, draft)
+      const attempt = await api.submitAnswer(selected.id, draft, {
+        provider,
+        ...(provider === 'deepseek' ? { cloudConsent, syllabus: syllabus.trim() } : {}),
+      })
       setState((s) => ({
         ...s,
         drafts: { ...s.drafts, [selected.id]: draft },
@@ -214,6 +233,8 @@ export default function App() {
     } catch (err) {
       setError(errorText(err))
     } finally {
+      submitting.current = false
+      setCloudConsent(false)
       setBusy(false)
     }
   }
@@ -288,7 +309,7 @@ export default function App() {
         <div className="local-status">
           <span className="status-dot" />
           <div>
-            本地学习模式<small>无需账号 · 离线可用</small>
+            本地优先学习<small>本地离线可用 · 云端需确认</small>
           </div>
         </div>
       </aside>
@@ -350,7 +371,7 @@ export default function App() {
                       ? '回看提交时的答案与反馈，找到下一次进步的起点。'
                       : view === 'adapters'
                         ? '从本地题库出发，逐步接入你自己的工具与 Agent。'
-                        : '选择一道题，展开思考，再用反馈校准自己的理解。'}
+                        : '选题 → 作答 → 审阅 → 重做：根据反馈改进答案，保留每次练习记录。'}
                   </p>
                 </div>
                 <div className="session-tag">
@@ -402,6 +423,7 @@ export default function App() {
                       aria-label="搜索题目"
                       placeholder="搜索题目、知识点…"
                       value={query}
+                      disabled={busy}
                       onChange={(e) => {
                         setQuery(e.target.value)
                         setTab('answer')
@@ -416,6 +438,7 @@ export default function App() {
                         <button
                           key={id}
                           aria-pressed={subject === id}
+                          disabled={busy}
                           onClick={() => {
                             setSubject(id)
                             setTab('answer')
@@ -496,7 +519,7 @@ export default function App() {
                             role="tab"
                             aria-selected={tab === 'review'}
                             onClick={() => setTab('review')}
-                            disabled={!latest}
+                            disabled={!latest || busy}
                           >
                             审阅反馈{' '}
                             {latest && <span className="tab-count">{attempts.length}</span>}
@@ -512,6 +535,7 @@ export default function App() {
                               <span className="muted">重做会新增一条记录，保留原来的提交。</span>
                               <button
                                 className="primary"
+                                disabled={busy}
                                 onClick={() => {
                                   updateDraft(emptyDraft())
                                   setTab('answer')
@@ -587,20 +611,128 @@ export default function App() {
                                 }
                                 onChange={(e) => updateDraft({ ...draft, text: e.target.value })}
                               />
-                              {selected.kind !== 'choice' && (
+                              {provider === 'local' && selected.kind !== 'choice' && (
                                 <div className="notice compact">
                                   本地审阅按关键词检查要点，仅供学习自查。绘图会随答案保存，暂不自动判断图形含义。
                                 </div>
                               )}
+                              <fieldset className="review-settings" disabled={busy}>
+                                <legend>选择审阅方式</legend>
+                                <div className="review-provider-options">
+                                  <label>
+                                    <input
+                                      type="radio"
+                                      name="review-provider"
+                                      value="local"
+                                      checked={provider === 'local'}
+                                      onChange={() => {
+                                        setProvider('local')
+                                        setCloudConsent(false)
+                                      }}
+                                    />
+                                    <span>
+                                      <strong>本地规则</strong>
+                                      <small>离线审阅，不发送答案</small>
+                                    </span>
+                                  </label>
+                                  <label>
+                                    <input
+                                      type="radio"
+                                      name="review-provider"
+                                      value="deepseek"
+                                      checked={provider === 'deepseek'}
+                                      disabled={!cloudReady}
+                                      onChange={() => {
+                                        setProvider('deepseek')
+                                        setCloudConsent(false)
+                                      }}
+                                    />
+                                    <span>
+                                      <strong>DeepSeek 云端</strong>
+                                      <small>
+                                        {cloudReady
+                                          ? '联网审阅，可能产生 API 费用'
+                                          : '尚未配置，暂不可用'}
+                                      </small>
+                                    </span>
+                                  </label>
+                                </div>
+                                {capabilities?.deepseek?.error && (
+                                  <p className="review-settings-note">
+                                    {capabilities.deepseek.error}
+                                  </p>
+                                )}
+                                {!cloudReady && (
+                                  <p className="review-settings-note">
+                                    DeepSeek
+                                    凭据需在应用外通过安全配置提供，配置后重启应用。本页面不接收 API
+                                    Key；具体步骤见 README。
+                                  </p>
+                                )}
+                                {provider === 'deepseek' && (
+                                  <div className="cloud-review-options">
+                                    <p className="review-settings-note">
+                                      模型：{capabilities?.deepseek?.model} ·
+                                      接收方：https://api.deepseek.com 。AI
+                                      反馈可能有误，请对照参考思路核查。
+                                    </p>
+                                    <label htmlFor="review-syllabus">学习范围 / 考纲（可选）</label>
+                                    <textarea
+                                      id="review-syllabus"
+                                      rows={3}
+                                      maxLength={4000}
+                                      value={syllabus}
+                                      placeholder="可粘贴你希望参考的学习范围或考纲节选，请勿填写密钥或个人敏感信息。"
+                                      onChange={(event) => {
+                                        setSyllabus(event.target.value)
+                                        setCloudConsent(false)
+                                      }}
+                                    />
+                                    <p className="review-settings-note">
+                                      {syllabus.length}/4000 字 ·
+                                      仅在本次页面会话保留。不填写时不会声称依据官方考纲；填写内容也未经官方核验。
+                                    </p>
+                                    <p className="review-settings-note">
+                                      发送前请移除题目、答案及学习范围中的姓名、身份信息和私人内容。不会附带历史练习记录或以往成绩。
+                                    </p>
+                                    <label className="cloud-consent">
+                                      <input
+                                        type="checkbox"
+                                        checked={cloudConsent}
+                                        onChange={(event) => setCloudConsent(event.target.checked)}
+                                      />
+                                      <span>
+                                        我同意本次将当前题目（含来源、参考答案 /
+                                        解析和评分要点）、我的答案（选项、文字、模块和绘图坐标 /
+                                        连线）及上方学习范围发送至
+                                        DeepSeek（https://api.deepseek.com）进行审阅，可能产生 API
+                                        费用。每次提交均需重新确认。
+                                      </span>
+                                    </label>
+                                  </div>
+                                )}
+                                <p className="review-settings-note">
+                                  所有审阅结果仅供练习反馈，不是官方成绩。
+                                </p>
+                              </fieldset>
                             </div>
                             <div className="exercise-actions">
                               <span className="muted">
-                                <span className="status-dot" /> 本地规则审阅已就绪
+                                <span className="status-dot" />{' '}
+                                {provider === 'local'
+                                  ? '本地规则审阅已就绪'
+                                  : cloudConsent
+                                    ? '已确认本次云端发送'
+                                    : '请确认本次云端发送'}
                               </span>
                               <button
                                 className="primary"
                                 onClick={submit}
-                                disabled={!canSubmit || busy}
+                                disabled={
+                                  !canSubmit ||
+                                  busy ||
+                                  (provider === 'deepseek' && (!cloudReady || !cloudConsent))
+                                }
                               >
                                 {busy ? '正在审阅…' : '提交并审阅'} <span>→</span>
                               </button>
@@ -698,10 +830,14 @@ export default function App() {
                     <h2>审阅 Agent</h2>
                     <p>{capabilities?.reviewer}</p>
                     <div className="adapter-detail">
-                      选择题按答案核对；主观题按关键词反馈得分点。接口可替换为模型适配器。
+                      本地模式：选择题按答案核对；主观题按关键词反馈得分点。DeepSeek
+                      模式：确认发送范围后获取云端练习反馈。
                     </div>
                     <div className="notice">
-                      尚未接入外部大模型。当前不会上传答案，也不生成新的试题。
+                      {cloudReady
+                        ? `DeepSeek 已配置（${capabilities?.deepseek?.model}），仅表示检测到配置，尚未验证网络或凭据。每次提交前需确认发送，可能产生 API 费用。`
+                        : 'DeepSeek 尚未配置。请在应用外安全配置凭据后重启；不要把 API Key 粘贴到答案或学习范围中。'}
+                      当前使用已有题库，不生成新试题；反馈不代表官方成绩。
                     </div>
                   </section>
                   <section className="card adapter-card wide">
@@ -723,7 +859,7 @@ export default function App() {
                   ExamCraft <b>0.1</b>
                 </span>
                 <span>学会一道题，比刷过一道题更重要。</span>
-                <span>数据保存在这台设备</span>
+                <span>记录保存在本机 · 云端审阅需逐次确认</span>
               </footer>
             </>
           )}

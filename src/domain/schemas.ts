@@ -183,3 +183,9 @@ export function validateAnswer(
     throw new Error('请先填写答案或绘图')
   return draft
 }
+
+export const submissionOptionsSchema = z.strictObject({
+  provider: z.enum(['local', 'deepseek']),
+  cloudConsent: z.boolean().optional(),
+  syllabus: z.string().trim().max(4000).optional(),
+})

@@ -5,8 +5,8 @@ const api: ExamCraftApi = Object.freeze<ExamCraftApi>({
   listQuestions: () => ipcRenderer.invoke('examcraft:list-questions'),
   loadState: () => ipcRenderer.invoke('examcraft:load-state'),
   saveDraft: (questionId, draft) => ipcRenderer.invoke('examcraft:save-draft', questionId, draft),
-  submitAnswer: (questionId, draft) =>
-    ipcRenderer.invoke('examcraft:submit-answer', questionId, draft),
+  submitAnswer: (questionId, draft, options) =>
+    ipcRenderer.invoke('examcraft:submit-answer', questionId, draft, options),
   importQuestionBank: () => ipcRenderer.invoke('examcraft:import-bank'),
   getCapabilities: () => ipcRenderer.invoke('examcraft:capabilities'),
 })
