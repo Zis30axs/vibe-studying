@@ -532,6 +532,7 @@ export function KnowledgeLibrary({
             <label>
               知识库学科
               <select
+                aria-label="知识库学科"
                 value={browseSubject}
                 onChange={(event) => chooseSubject(event.target.value as Subject)}
               >
@@ -602,7 +603,11 @@ export function KnowledgeLibrary({
           {subjectDocuments.length > 0 && (
             <label className="knowledge-document-label">
               PDF 文档
-              <select value={selectedId} onChange={(event) => chooseDocument(event.target.value)}>
+              <select
+                aria-label="PDF 文档"
+                value={selectedId}
+                onChange={(event) => chooseDocument(event.target.value)}
+              >
                 {subjectDocuments.map((item) => (
                   <option value={item.id} key={item.id}>
                     {item.title} · {item.edition || '版本未确认'} · {item.pageCount} 页
@@ -640,6 +645,7 @@ export function KnowledgeLibrary({
                     <label>
                       教材学科
                       <select
+                        aria-label="教材学科"
                         value={metadataSubject}
                         onChange={(event) => {
                           metadataVersion.current++
@@ -712,6 +718,7 @@ export function KnowledgeLibrary({
                     <label>
                       检索范围
                       <select
+                        aria-label="检索范围"
                         value={scope}
                         onChange={(event) => {
                           invalidateSearch()

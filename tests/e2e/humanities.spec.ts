@@ -117,7 +117,27 @@ async function addWithKeyboard(page: Page, kind: string, target?: string) {
 
 async function addWithDrag(page: Page, kind: string, x: number, y: number) {
   const before = await nodeIds(page)
-  await page.getByTestId(`palette-${kind}`).dragTo(canvas(page), { targetPosition: { x, y } })
+  const source = page.getByTestId(`palette-${kind}`)
+  // Start Chromium's native drag before scrolling the destination. dragTo can
+  // scroll the palette away after mouse-down but before the first pressed move,
+  // canceling dragstart. Keep this as real pointer input, not injected DOM events.
+  await source.hover()
+  const start = await source.boundingBox()
+  if (!start) throw new Error('Drag source has no visible bounds')
+  await page.mouse.down()
+  try {
+    await page.mouse.move(start.x + start.width / 2 + 10, start.y + start.height / 2, {
+      steps: 5,
+    })
+    await canvas(page).scrollIntoViewIfNeeded()
+    const target = await canvas(page).boundingBox()
+    if (!target) throw new Error('Argument canvas has no visible bounds')
+    await page.mouse.move(target.x + x, target.y + y, { steps: 12 })
+    // A second native move ensures dragover follows dragenter before releasing.
+    await page.mouse.move(target.x + x, target.y + y)
+  } finally {
+    await page.mouse.up()
+  }
   await expect(nodes(page)).toHaveCount(before.length + 1)
   return (await nodeIds(page)).find((id) => !before.includes(id))!
 }
@@ -262,6 +282,10 @@ test('four humanities subjects offer structure templates, isolate drafts and ret
     await selectSubject(page, item.subject, item.title)
     await expect(nodes(page)).toHaveCount(0)
     if (item.subject === '地理') {
+      const toggle = page.getByRole('button', { name: '地理交互工作台', exact: true })
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      await toggle.click()
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true')
       const drawing = page.getByRole('region', { name: '地理绘图工作台', exact: true })
       await drawing.getByLabel('点标记', { exact: true }).fill('A')
       await drawing.getByLabel('X 坐标', { exact: true }).fill('1')

@@ -166,7 +166,7 @@ test('mock humanities review resets consent and sends current final text and str
   await expect(page.getByRole('region', { name: '审阅结果', exact: true })).toBeVisible()
   await page.getByRole('button', { name: /文科组装 Argument/ }).click()
   await page.getByTestId('palette-principle').click()
-  await page.getByTestId('drop-root').click()
+  await page.getByTestId('place-center').click()
   const principle = await page
     .getByTestId('argument-canvas')
     .locator('[data-block-id]')
@@ -184,7 +184,7 @@ test('mock humanities review resets consent and sends current final text and str
   await expect(consent).not.toBeChecked()
   await consent.check()
   await page.getByTestId('palette-material').click()
-  await page.getByTestId('drop-root').click()
+  await page.getByTestId('place-center').click()
   await expect(consent).not.toBeChecked()
   const material = await page
     .getByTestId('argument-canvas')

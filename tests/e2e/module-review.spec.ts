@@ -24,6 +24,9 @@ async function launch() {
   env.EXAMCRAFT_USER_DATA = directory
   delete env.DEEPSEEK_API_KEY
   app = await electron.launch({ args: ['.'], env })
+  // Startup registers IPC handlers before creating the window. Replacing them
+  // earlier can race that registration and leave startup in an error dialog.
+  const page = await app.firstWindow()
   await app.evaluate(({ ipcMain }) => {
     const state = globalThis as typeof globalThis & {
       moduleRequests: ModuleReviewRequest[]
@@ -87,7 +90,6 @@ async function launch() {
       state.moduleCancels.push(id)
     })
   })
-  const page = await app.firstWindow()
   await page.reload()
   await page
     .getByRole('navigation', { name: '工作区导航' })
@@ -162,15 +164,22 @@ test('selected span is explicit and changing scope resets consent; rejection pre
   const { page, text } = await launch()
   const before = await text.inputValue()
   await page.getByRole('button', { name: '✦ 检查模块', exact: true }).click()
-  await panel(page)
-    .getByLabel('模块原文快照')
-    .evaluate((element) => {
-      const area = element as HTMLTextAreaElement
-      area.focus()
-      area.setSelectionRange(4, 8)
-      area.dispatchEvent(new Event('select', { bubbles: true }))
-    })
+  const consent = panel(page).getByRole('checkbox', { name: /我同意将上述检查内容/ })
+  await consent.check()
+  // React's onSelect is derived from keyboard/selectionchange events, not a
+  // dispatched native select event. Exercise an actual keyboard selection and
+  // verify the visible scope before consenting to the request.
+  const snapshot = panel(page).getByLabel('模块原文快照')
+  await snapshot.focus()
+  await snapshot.press('ControlOrMeta+Home')
+  for (let index = 0; index < 4; index++) await snapshot.press('ArrowRight')
+  for (let index = 0; index < 4; index++) await snapshot.press('Shift+ArrowRight')
+  await expect(
+    panel(page).getByText(`限定片段：${before.slice(4, 8)}`, { exact: true }),
+  ).toBeVisible()
+  await expect(consent).not.toBeChecked()
   await send(page)
+  await expect.poll(requestCount).toBe(1)
   const requests = await app!.evaluate(
     () =>
       (globalThis as typeof globalThis & { moduleRequests: ModuleReviewRequest[] }).moduleRequests,
@@ -182,11 +191,11 @@ test('selected span is explicit and changing scope resets consent; rejection pre
   })
   await panel(page).getByRole('button', { name: '拒绝此建议' }).click()
   await expect(text).toHaveValue(before)
-  const consent = panel(page).getByRole('checkbox', { name: /我同意将上述检查内容/ })
   await consent.check()
   await panel(page).getByRole('radio', { name: '全部模块', exact: true }).check()
   await expect(consent).not.toBeChecked()
   await send(page)
+  await expect.poll(requestCount).toBe(2)
   const allRequest = await app!.evaluate(() =>
     (globalThis as typeof globalThis & { moduleRequests: ModuleReviewRequest[] }).moduleRequests.at(
       -1,

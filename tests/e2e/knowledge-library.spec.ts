@@ -142,10 +142,20 @@ async function openLibrary(page: Page) {
   if (!(await panel.getByRole('button', { name: '导入本地 PDF', exact: true }).isVisible()))
     await page.locator('.knowledge-summary').click()
   await expect(panel).toBeVisible()
+  // Select option text must not become part of the control's stable label.
+  const subject = panel.getByRole('combobox', { name: '知识库学科', exact: true })
+  await expect(subject).toHaveAccessibleName('知识库学科')
+  await expect(subject.locator('option')).toHaveCount(6)
 }
 async function importPdf(page: Page) {
   await library(page).getByRole('button', { name: '导入本地 PDF', exact: true }).click()
   await expect(library(page).getByLabel('PDF 文档', { exact: true })).toContainText(TITLE)
+  await expect(
+    library(page).getByRole('combobox', { name: 'PDF 文档', exact: true }),
+  ).toHaveAccessibleName('PDF 文档')
+  await expect(
+    library(page).getByRole('combobox', { name: '检索范围', exact: true }),
+  ).toHaveAccessibleName('检索范围')
   const documents = await page.evaluate(() => window.examcraft!.listKnowledgeDocuments())
   expect(documents).toHaveLength(1)
   return documents[0]
@@ -787,6 +797,9 @@ test('editing book metadata preserves the PDF and resets evidence; changing brow
   await library(page).getByLabel('知识库学科', { exact: true }).selectOption('politics')
   await panel.getByRole('button', { name: '关闭 Advisor', exact: true }).click()
   await library(page).locator('.knowledge-metadata-editor > summary').click()
+  await expect(
+    library(page).getByRole('combobox', { name: '教材学科', exact: true }),
+  ).toHaveAccessibleName('教材学科')
   await library(page).getByLabel('教材名称', { exact: true }).fill('已核对名称')
   await library(page).getByLabel('教材版本 / 册次', { exact: true }).fill('自编教材 · 2026 测试版')
   await library(page)

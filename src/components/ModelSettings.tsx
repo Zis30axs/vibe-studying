@@ -72,6 +72,7 @@ export function ModelSettings({ api, config, onChange }: Props) {
           <label>
             API 协议
             <select
+              aria-label="API 协议"
               value={protocol}
               disabled={busy}
               onChange={(event) => {
