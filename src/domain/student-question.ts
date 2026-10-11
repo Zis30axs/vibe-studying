@@ -1,3 +1,4 @@
+import { geometrySceneSchema } from '../shared/geometry'
 import { terrainExerciseSchema } from './terrain-exercise'
 import { z } from 'zod'
 import { subjects } from '../shared/subjects'
@@ -34,6 +35,7 @@ export const studentQuestionSchema = z
       .max(10)
       .optional(),
     figure: geographyFigureSchema.optional(),
+    geometry: geometrySceneSchema.optional(),
     terrain: terrainExerciseSchema.optional(),
     provenance: questionProvenanceSchema.optional(),
     researchOrigin: questionResearchOriginSchema.optional(),
@@ -44,6 +46,8 @@ export const studentQuestionSchema = z
       ctx.addIssue({ code: 'custom', message: '题目来源标识与来源记录不一致' })
     if ((question.figure || question.terrain) && question.subject !== 'geography')
       ctx.addIssue({ code: 'custom', message: '示意图只适用于地理题' })
+    if (question.geometry && question.subject !== 'math')
+      ctx.addIssue({ code: 'custom', message: '几何场景只适用于数学题' })
     if (question.figure && question.terrain)
       ctx.addIssue({ code: 'custom', message: '题目不能同时包含普通示意图与模拟地形' })
     if (question.kind !== 'choice' && question.kind !== question.subject)
@@ -70,6 +74,7 @@ export function studentQuestionProjection(question: Question): StudentQuestion {
     source: question.source,
     tags: question.tags.map((tag) => tag),
     maxScore: question.maxScore,
+    ...(question.geometry ? { geometry: geometrySceneSchema.parse(question.geometry) } : {}),
     ...(question.figure ? { figure: geographyFigureSchema.parse(question.figure) } : {}),
     ...(question.terrain ? { terrain: terrainExerciseSchema.parse(question.terrain) } : {}),
     ...(question.provenance

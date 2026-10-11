@@ -1,3 +1,4 @@
+import { AGENT_DEFAULT_TOOLS, availableAgentTools } from '../src/domain/agent-workbench-ui'
 import { FORMULA_ENTRIES, FORMULA_CATALOG_VERSION } from '../src/domain/formula-catalog'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -602,4 +603,185 @@ it('retrieves a persistent review index through an actual native tool loop witho
   expect(JSON.stringify(payloads[1])).toContain(excerpt.text)
   expect(JSON.stringify(payloads)).not.toContain('PRIVATE_REVIEW')
   expect(JSON.stringify(payloads)).not.toContain('PRIVATE_OLD_REVIEW')
+})
+
+describe('geometry template native tool lifecycle', () => {
+  it('generates one deterministic proposal inside shared budgets and saves only after explicit acceptance', async () => {
+    const payloads: any[] = []
+    const f = await fixture(
+      vi.fn(async (_url, init) => {
+        payloads.push(JSON.parse(String(init?.body)))
+        return payloads.length === 1
+          ? call('geometry-1', 'generate_geometry_question', {
+              templateId: 'square-pyramid-locus',
+              parameters: { side: 5 },
+            })
+          : final('已生成待确认的原创几何题。')
+      }) as typeof fetch,
+    )
+    await f.agent.start({
+      ...f.request,
+      mode: 'create',
+      allowedTools: ['generate_geometry_question'],
+    })
+    const state = await finished(f.agent, f.request.runId)
+    expect(state.status).toBe('complete')
+    expect(state.toolCalls).toBe(1)
+    expect(state.modelRequests).toBe(2)
+    expect(state.delegatedCalls).toBe(0)
+    expect(state.proposals).toHaveLength(1)
+    expect(f.saves).not.toHaveBeenCalled()
+    const tool = JSON.parse(payloads[1].messages.find((m: any) => m.role === 'tool').content)
+    expect(tool.question.geometry.kind).toBe('geometry-3d')
+    expect(tool.question).not.toHaveProperty('explanation')
+    expect(tool.question).not.toHaveProperty('rubric')
+    const accepted = await f.agent.accept({
+      runId: f.request.runId,
+      proposalId: state.proposals[0].proposalId,
+    })
+    expect(accepted.kind).toBe('question')
+    expect(f.saves).toHaveBeenCalledTimes(1)
+    expect(accepted).not.toHaveProperty('question.explanation')
+  })
+  it('cancellation discards generated previews and prevents later acceptance', async () => {
+    let count = 0
+    const f = await fixture(
+      vi.fn(async () =>
+        ++count === 1
+          ? call('geometry-cancel', 'generate_geometry_question', {
+              templateId: 'square-pyramid-locus',
+              parameters: { side: 3 },
+            })
+          : final(),
+      ) as typeof fetch,
+    )
+    await f.agent.start({
+      ...f.request,
+      mode: 'create',
+      allowedTools: ['generate_geometry_question'],
+    })
+    const state = await finished(f.agent, f.request.runId)
+    expect(state.proposals).toHaveLength(1)
+    f.agent.cancel(f.request.runId)
+    await expect(
+      f.agent.accept({ runId: f.request.runId, proposalId: state.proposals[0].proposalId }),
+    ).rejects.toThrow()
+    expect(f.saves).not.toHaveBeenCalled()
+  })
+})
+
+describe('automatic host geometry teaching strategies', () => {
+  it.each([
+    ['出一道空间向量题', '空间向量', 'vector-angle-orthogonality'],
+    ['出一道求三角形高线和平行线的题', '平面直线', 'triangle-altitude-parallel'],
+    ['出一道斜平行六面体长度和夹角题', '斜平行六面体', 'oblique-parallelepiped'],
+    ['出一道棱锥中动点在整个平面运动的角度范围题', '正方形底面棱锥', 'square-pyramid-locus'],
+  ])(
+    'ordinary request %s discovers an internal strategy and returns an illustrated staged question',
+    async (task, topic, expectedTemplate) => {
+      const payloads: any[] = []
+      let selectedTemplate = ''
+      const f = await fixture(
+        vi.fn(async (_url, init) => {
+          const payload = JSON.parse(String(init?.body))
+          payloads.push(payload)
+          if (payloads.length > 1) return final('已生成配套几何图，请查看待确认的新题。')
+          const system = payload.messages.find((m: any) => m.role === 'system').content as string
+          expect(system).toContain('应用宿主内置的可信数学出题策略')
+          expect(system).toContain('不得要求用户阅读、复制、粘贴提示词')
+          expect(system).toContain('geometry_calculate({request:{operation,...}})')
+          const text = system
+            .split('<geometry-template-catalog>\n')[1]
+            ?.split('\n</geometry-template-catalog>')[0]
+          expect(text).toBeTruthy()
+          const catalog = JSON.parse(text)
+          expect(catalog).toHaveLength(4)
+          // Synthetic model consumes only the catalog actually sent by the host.
+          // This proves the workflow, not the quality of any real model's topic selection.
+          const strategy = catalog.find((item: any) => item.title.includes(topic))
+          expect(strategy).toBeTruthy()
+          expect(strategy.teachingConstraints).toBeTruthy()
+          expect(strategy.parameters).toBeTruthy()
+          expect(strategy).not.toHaveProperty('explanation')
+          selectedTemplate = strategy.templateId
+          expect(
+            payload.tools.some((tool: any) => tool.function?.name === 'generate_geometry_question'),
+          ).toBe(true)
+          return call('automatic-geometry', 'generate_geometry_question', {
+            templateId: strategy.templateId,
+            parameters: strategy.defaultParameters,
+          })
+        }) as typeof fetch,
+      )
+      const enabled = availableAgentTools({
+        subject: 'math',
+        mode: 'create',
+        hasQuestion: false,
+        includeAnswer: false,
+        hasModules: false,
+        includeReference: false,
+        hasKnowledge: false,
+        allowDelegation: false,
+      }).filter((name) => AGENT_DEFAULT_TOOLS.includes(name))
+      await f.agent.start({ ...f.request, task, mode: 'create', allowedTools: enabled })
+      const state = await finished(f.agent, f.request.runId)
+      expect(state.status).toBe('complete')
+      expect(selectedTemplate).toBe(expectedTemplate)
+      expect(state.toolCalls).toBe(1)
+      expect(state.modelRequests).toBe(2)
+      expect(state.delegatedCalls).toBe(0)
+      expect(state.proposals).toHaveLength(1)
+      expect(f.saves).not.toHaveBeenCalled()
+      const userInput = JSON.parse(payloads[0].messages.find((m: any) => m.role === 'user').content)
+      expect(userInput.task).toBe(task)
+      expect(userInput.task).not.toContain('generate_geometry_question')
+      const tool = JSON.parse(payloads[1].messages.find((m: any) => m.role === 'tool').content)
+      expect(tool.question.geometry.kind).toBe('geometry-3d')
+      expect(tool.question.geometry.points.length).toBeGreaterThan(0)
+      expect(tool.question).not.toHaveProperty('explanation')
+      expect(tool.question).not.toHaveProperty('rubric')
+      const saved = await f.agent.accept({
+        runId: f.request.runId,
+        proposalId: state.proposals[0].proposalId,
+      })
+      expect(saved.kind).toBe('question')
+      expect(f.saves).toHaveBeenCalledTimes(1)
+    },
+  )
+  it.each([
+    ['learner', 'math', 'geometry_calculate'],
+    ['review', 'math', 'geometry_calculate'],
+    ['create', 'geography', 'geography_measure'],
+    ['create', 'math', 'geometry_calculate'],
+  ] as const)(
+    'does not inject teaching strategies into %s/%s without the authorized generator',
+    async (mode, subject, tool) => {
+      const payloads: any[] = []
+      const f = await fixture(
+        vi.fn(async (_url, init) => {
+          payloads.push(JSON.parse(String(init?.body)))
+          return final()
+        }) as typeof fetch,
+      )
+      await f.agent.start({
+        ...f.request,
+        mode,
+        subject,
+        allowedTools: [tool],
+        ...(mode === 'review'
+          ? {
+              questionIds: [question.id],
+              currentQuestionId: question.id,
+              includeReference: true,
+              answer: { ...emptyDraft(), text: 'Synthetic review draft' },
+            }
+          : {}),
+      })
+      const state = await finished(f.agent, f.request.runId)
+      expect(state.status).toBe('complete')
+      expect(JSON.stringify(payloads)).not.toContain('<geometry-template-catalog>')
+      expect(JSON.stringify(payloads)).not.toContain('defaultParameters')
+      expect(f.saves).not.toHaveBeenCalled()
+    },
+  )
 })

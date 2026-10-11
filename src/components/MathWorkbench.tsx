@@ -4,6 +4,8 @@ import type { MathWorkbenchState, GeoPoint } from '../shared/types'
 import { emptyMathState } from '../shared/types'
 import { angle, distance, parseFunctionExpression, sampleFunction } from '../domain/math'
 import { canConnectPoints, removeDrawingPoint } from '../domain/coordinates'
+import { perpendicular2D } from '../domain/geometry'
+import { GeometryWorkbench } from './GeometryWorkbench'
 import {
   DEFAULT_SNAP_STEP,
   DEFAULT_PROJECTION_COLOR,
@@ -17,7 +19,7 @@ import {
 } from '../domain/math-canvas'
 import './math.css'
 
-type Tool = 'move' | 'point' | 'line' | 'measure'
+type Tool = 'move' | 'point' | 'line' | 'perpendicular' | 'measure'
 const pixel = (p: { x: number; y: number }) => ({ x: 280 + p.x * 24, y: 280 - p.y * 24 })
 const ticks = [-10, -8, -6, -4, -2, 0, 2, 4, 6, 8, 10]
 function ParameterNumber({
@@ -48,6 +50,96 @@ function ParameterNumber({
     />
   )
 }
+/** Build one undoable construction from saved point IDs, without mutating the draft. */
+export function constructPerpendicularState(
+  value: MathWorkbenchState,
+  selection: { point: string; from: string; to: string },
+) {
+  const point = value.drawing.points.find((p) => p.id === selection.point)
+  const a = value.drawing.points.find((p) => p.id === selection.from)
+  const b = value.drawing.points.find((p) => p.id === selection.to)
+  if (!point || !a || !b || a.id === b.id)
+    throw new Error('请选择待作垂线的点和直线上的两个不同端点。')
+  let result: ReturnType<typeof perpendicular2D>
+  try {
+    result = perpendicular2D({ x: point.x, y: point.y }, { x: a.x, y: a.y }, { x: b.x, y: b.y })
+  } catch {
+    throw new Error('无法构造：直线的两个端点不能重合，坐标须为有限数值。')
+  }
+  const inside = (p: { x: number; y: number }) => Math.abs(p.x) <= 10 && Math.abs(p.y) <= 10
+  if (!inside(result.foot)) throw new Error('垂足超出当前 −10 到 10 的画布范围，请调整点或直线。')
+  const points = [...value.drawing.points],
+    lines = [...value.drawing.lines]
+  let n = 1
+  function obtain(p: { x: number; y: number }, prefix: string) {
+    const existing = points.find((q) => Math.hypot(p.x - q.x, p.y - q.y) < 1e-8)
+    if (existing) return existing
+    while (points.some((q) => q.label === `${prefix}${n}`)) n++
+    const next = { id: crypto.randomUUID(), label: `${prefix}${n}`, x: p.x, y: p.y }
+    points.push(next)
+    return next
+  }
+  const foot = obtain(result.foot, 'H')
+  let endpoint = point
+  if (result.distance < 1e-8) {
+    const d = result.perpendicularDirection
+    const candidates = [1, -1]
+      .map((sign) => {
+        const dx = sign * d.x,
+          dy = sign * d.y
+        const boundary = (position: number, direction: number) =>
+          direction > 0
+            ? (10 - position) / direction
+            : direction < 0
+              ? (-10 - position) / direction
+              : Infinity
+        const length = Math.min(1, boundary(point.x, dx), boundary(point.y, dy))
+        const safeLength = length < 1 ? length * 0.9 : length
+        return { x: point.x + dx * safeLength, y: point.y + dy * safeLength, length: safeLength }
+      })
+      .sort((a, b) => b.length - a.length)
+    const target = candidates.find((candidate) => candidate.length > 1e-8 && inside(candidate))
+    if (!target) throw new Error('该边界点的垂线不能在画布内延伸，请先将点向内移动。')
+    endpoint = obtain(target, 'Q')
+  }
+  function ensureLine(from: string, to: string) {
+    if (
+      from !== to &&
+      !lines.some(
+        (line) => (line.from === from && line.to === to) || (line.from === to && line.to === from),
+      )
+    )
+      lines.push({ id: crypto.randomUUID(), from, to })
+  }
+  ensureLine(a.id, b.id)
+  ensureLine(foot.id, endpoint.id)
+  const t =
+    ((foot.x - a.x) * (b.x - a.x) + (foot.y - a.y) * (b.y - a.y)) /
+    ((b.x - a.x) ** 2 + (b.y - a.y) ** 2)
+  if (t < 0) ensureLine(foot.id, a.id)
+  if (t > 1) ensureLine(foot.id, b.id)
+  if (points.length > 200 || lines.length > 400)
+    throw new Error('构造会超过 200 个点或 400 条线段的上限。')
+  const reference =
+    Math.hypot(a.x - foot.x, a.y - foot.y) > Math.hypot(b.x - foot.x, b.y - foot.y) ? a : b
+  const duplicate = (value.rightAngles ?? []).some(
+    (r) => r.vertex === foot.id && r.from === reference.id && r.to === endpoint.id,
+  )
+  const rightAngles = duplicate
+    ? value.rightAngles
+    : [
+        ...(value.rightAngles ?? []),
+        { id: crypto.randomUUID(), vertex: foot.id, from: reference.id, to: endpoint.id },
+      ]
+  if ((rightAngles?.length ?? 0) > 100)
+    throw new Error('最多 100 个直角标记，请先删除不需要的构造点。')
+  return {
+    state: { ...value, drawing: { ...value.drawing, points, lines }, rightAngles },
+    foot,
+    message:
+      result.distance < 1e-8 ? '该点位于直线上，已作过该点的非零垂线段。' : '已构造垂足和垂线段。',
+  }
+}
 export function MathWorkbench({
   value,
   onChange,
@@ -76,6 +168,7 @@ export function MathWorkbench({
   const [history, setHistory] = useState<MathWorkbenchState[]>([])
   const [selected, setSelected] = useState('')
   const [lineStart, setLineStart] = useState('')
+  const [perpendicular, setPerpendicular] = useState({ point: '', from: '', to: '' })
   const [expression, setExpression] = useState(value.expression)
   // The workbench stays mounted while reviewing/restarting an answer. Follow a
   // changed saved expression, but preserve unapplied input during unrelated edits.
@@ -122,8 +215,25 @@ export function MathWorkbench({
     .map((pid) => drawing.points.find((p) => p.id === pid))
     .filter((p): p is GeoPoint => Boolean(p))
   const degrees = measured.length === 3 ? angle(measured[0], measured[1], measured[2]) : null
+  function validRightAngles(next: MathWorkbenchState) {
+    const seen = new Set<string>()
+    return (next.rightAngles ?? []).filter((relation) => {
+      const o = next.drawing.points.find((p) => p.id === relation.vertex)
+      const a = next.drawing.points.find((p) => p.id === relation.from)
+      const b = next.drawing.points.find((p) => p.id === relation.to)
+      if (!o || !a || !b || seen.has(relation.id)) return false
+      seen.add(relation.id)
+      const ux = a.x - o.x,
+        uy = a.y - o.y,
+        vx = b.x - o.x,
+        vy = b.y - o.y
+      const scale = Math.hypot(ux, uy) * Math.hypot(vx, vy)
+      return scale > 1e-12 && Math.abs(ux * vx + uy * vy) <= scale * 1e-8
+    })
+  }
   function commit(next: MathWorkbenchState) {
     if (disabled) return
+    if (next.rightAngles) next = { ...next, rightAngles: validRightAngles(next) }
     setHistory((h) => [...h.slice(-39), value])
     onChange(next)
     setMessage('')
@@ -135,6 +245,7 @@ export function MathWorkbench({
   function clearSelection() {
     setSelected('')
     setLineStart('')
+    setPerpendicular({ point: '', from: '', to: '' })
     setFrom('')
     setTo('')
     setFields({ label: '', x: '0', y: '0' })
@@ -155,6 +266,17 @@ export function MathWorkbench({
         lines: [...value.drawing.lines, { id: crypto.randomUUID(), from: a, to: b }],
       },
     })
+  }
+  function constructPerpendicular() {
+    if (disabled) return
+    try {
+      const result = constructPerpendicularState(value, perpendicular)
+      commit(result.state)
+      select(result.foot)
+      setMessage(result.message)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '无法构造垂线。')
+    }
   }
   function choose(p: GeoPoint) {
     if (disabled) return
@@ -378,6 +500,7 @@ export function MathWorkbench({
             ['move', '移动点'],
             ['point', '描点'],
             ['line', '连线'],
+            ['perpendicular', '作垂线'],
             ['measure', '测量'],
           ] as const
         ).map(([key, label]) => (
@@ -416,7 +539,7 @@ export function MathWorkbench({
       </div>
       {confirm && (
         <div role="alert" className="math-confirm">
-          清除点、线、测量和函数设置？可以撤销。
+          清除二维与三维点线、测量和函数设置？可以撤销。
           <button
             type="button"
             disabled={disabled}
@@ -425,6 +548,8 @@ export function MathWorkbench({
               const next = emptyMathState()
               commit(next)
               setExpression(next.expression)
+              setSnapText(String(next.snapStep ?? DEFAULT_SNAP_STEP))
+              setTool('move')
               clearSelection()
               setConfirm(false)
             }}
@@ -554,6 +679,33 @@ export function MathWorkbench({
                       y2={q.y}
                       stroke="#167d86"
                       strokeWidth="2.5"
+                    />
+                  )
+                })}
+                {validRightAngles({ ...value, drawing }).map((relation) => {
+                  const o = drawing.points.find((p) => p.id === relation.vertex)!
+                  const a = drawing.points.find((p) => p.id === relation.from)!
+                  const b = drawing.points.find((p) => p.id === relation.to)!
+                  const u = { x: a.x - o.x, y: a.y - o.y },
+                    v = { x: b.x - o.x, y: b.y - o.y }
+                  const lu = Math.hypot(u.x, u.y),
+                    lv = Math.hypot(v.x, v.y)
+                  const size = Math.min(0.4, lu * 0.25, lv * 0.25)
+                  const corner = (x: number, y: number) =>
+                    pixel({
+                      x: o.x + size * ((x * u.x) / lu + (y * v.x) / lv),
+                      y: o.y + size * ((x * u.y) / lu + (y * v.y) / lv),
+                    })
+                  return (
+                    <polyline
+                      key={relation.id}
+                      data-testid="math-right-angle"
+                      points={[corner(1, 0), corner(1, 1), corner(0, 1)]
+                        .map((p) => `${p.x},${p.y}`)
+                        .join(' ')}
+                      fill="none"
+                      stroke="#b57136"
+                      strokeWidth="2"
                     />
                   )
                 })}
@@ -710,7 +862,9 @@ export function MathWorkbench({
                 ? '点击网格添加点。'
                 : tool === 'line'
                   ? `依次选两个点连线。${lineStart ? '已选起点。' : ''}`
-                  : '按顺序选择 2 点测距、3 点测角；第 2 点为顶点，再选一次取消。'}{' '}
+                  : tool === 'perpendicular'
+                    ? '在下方作垂线表单中，选择一个点与确定直线的两个端点。'
+                    : '按顺序选择 2 点测距、3 点测角；第 2 点为顶点，再选一次取消。'}{' '}
             横纵轴等比例，角度单位为度。右键网格可添加吸附点；滚轮向下变精细、向上变粗。
             画布悬停或聚焦时按 I 切换轴距投影；重叠标签自动避让，悬停或选中的点优先显示。
           </p>
@@ -1010,6 +1164,56 @@ export function MathWorkbench({
           </button>
         </form>
       </fieldset>
+      {tool === 'perpendicular' && (
+        <fieldset className="math-editors math-perpendicular" disabled={disabled}>
+          <legend>过一点作直线的垂线</legend>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              constructPerpendicular()
+            }}
+          >
+            {(
+              [
+                ['point', '过点'],
+                ['from', '直线起点'],
+                ['to', '直线终点'],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key}>
+                {label}
+                <select
+                  aria-label={`垂线${label}`}
+                  value={perpendicular[key]}
+                  onChange={(event) =>
+                    setPerpendicular({ ...perpendicular, [key]: event.target.value })
+                  }
+                >
+                  <option value="">请选择</option>
+                  {drawing.points.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label} ({p.x}, {p.y})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+            <button type="submit">构造垂线</button>
+            <button
+              type="button"
+              onClick={() => {
+                setPerpendicular({ point: '', from: '', to: '' })
+                setTool('move')
+              }}
+            >
+              取消作垂线
+            </button>
+          </form>
+          <p className="math-help">
+            按数值坐标计算垂足；点已在直线上时构造过该点的非零垂线段。移动点后，仅仍符合直角的标记会保留。
+          </p>
+        </fieldset>
+      )}
       <div className="math-point-list" aria-label="数学点列表">
         {drawing.points.map((p) => (
           <button
@@ -1053,6 +1257,11 @@ export function MathWorkbench({
         原创交互演示：试着改变 a，观察抛物线开口；放置 A(0,0)、B(3,0)、C(3,4)，测量
         AB、∠ABC。图像仅为有限采样，不证明连续性、定义域或结论；请保留文字推导。
       </p>
+      <GeometryWorkbench
+        value={value.geometry}
+        onChange={(geometry) => commit({ ...value, geometry })}
+        disabled={disabled}
+      />
     </section>
   )
 }

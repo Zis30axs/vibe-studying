@@ -1,0 +1,185 @@
+import { z } from 'zod'
+
+const integer = (minimum: number, maximum: number) => z.number().int().min(minimum).max(maximum)
+const quarter = z.union([z.literal(0.25), z.literal(0.5), z.literal(0.75)])
+const lean = z.union([z.literal(0.25), z.literal(0.5)])
+
+/** Constructive families only. Unknown answer, scene, script and provenance fields are rejected. */
+export const geometryTemplateInputSchema = z.discriminatedUnion('templateId', [
+  z.strictObject({
+    templateId: z.literal('vector-angle-orthogonality'),
+    parameters: z.strictObject({
+      aX: integer(1, 6),
+      bX: z.union([integer(-6, -1), integer(1, 6)]),
+      bZ: integer(1, 6),
+      mix: integer(1, 4),
+    }),
+  }),
+  z.strictObject({
+    templateId: z.literal('triangle-altitude-parallel'),
+    parameters: z
+      .strictObject({
+        run: integer(1, 8),
+        rise: integer(-6, 6),
+        footFraction: quarter,
+        height: integer(1, 4),
+        offsetX: integer(-5, 5),
+        offsetY: integer(-5, 5),
+      })
+      .refine(
+        ({ run, rise, footFraction, height, offsetX, offsetY }) =>
+          [
+            offsetX,
+            offsetY,
+            offsetX + run,
+            offsetY + rise,
+            offsetX + footFraction * run - height * rise,
+            offsetY + footFraction * rise + height * run,
+          ].every((coordinate) => Math.abs(coordinate) <= 10),
+        'A、B、C的全部平面坐标须在[-10,10]内，确保可在平面画板中构造垂足',
+      ),
+  }),
+  z.strictObject({
+    templateId: z.literal('oblique-parallelepiped'),
+    parameters: z.strictObject({
+      baseA: integer(2, 10),
+      baseB: integer(2, 10),
+      side: integer(2, 10),
+      leanX: lean,
+      leanY: lean,
+      edgeFraction: quarter,
+    }),
+  }),
+  z.strictObject({
+    templateId: z.literal('square-pyramid-locus'),
+    parameters: z.strictObject({ side: integer(2, 12) }),
+  }),
+])
+
+export type GeometryTemplateInput = z.infer<typeof geometryTemplateInputSchema>
+export type GeometryTemplateId = GeometryTemplateInput['templateId']
+
+/** MCP SDKs inspect a top-level object shape; keep the strict matching check at runtime too. */
+export const geometryTemplateToolSchema = z
+  .strictObject({
+    templateId: z.enum([
+      'vector-angle-orthogonality',
+      'triangle-altitude-parallel',
+      'oblique-parallelepiped',
+      'square-pyramid-locus',
+    ]),
+    parameters: z.union([
+      geometryTemplateInputSchema.options[0].shape.parameters,
+      geometryTemplateInputSchema.options[1].shape.parameters,
+      geometryTemplateInputSchema.options[2].shape.parameters,
+      geometryTemplateInputSchema.options[3].shape.parameters,
+    ]),
+  })
+  .superRefine((input, context) => {
+    const result = geometryTemplateInputSchema.safeParse(input)
+    if (!result.success)
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message: '参数必须匹配所选几何模板及其联合范围限制',
+      })
+  })
+
+export interface GeometryTemplateDescriptor {
+  id: GeometryTemplateId
+  title: string
+  /** Copyable user request, not a solved question or a private screenshot transcription. */
+  prompt: string
+  defaultParameters: GeometryTemplateInput['parameters']
+  parameterDescriptions: Record<string, string>
+  generationInstructions: string
+}
+
+export const GEOMETRY_GENERATION_INSTRUCTIONS =
+  '生成新的数学练习，只选择模板和允许的参数。题干、三轴几何场景、数值参考和练习评分由本地确定性程序生成；不改写为截图原题，不推测原卷分数，不把练习评分称为官方评分。' +
+  '调用 generate_geometry_question({templateId,parameters}) 产生待确认草案，不自动保存。禁止提交题干、答案、评分、geometry、SVG、脚本或网址等额外字段。' +
+  '一次任务总共最多调用6次工具；通常1次生成调用已足够。需要公式时可先调用 search_formulas({query,limit:1})。' +
+  '数值核验只用实际的 geometry_calculate({request:{operation,...}})，向量点均为{x,y,z}。' +
+  '支持 vector_metrics{a,b}、point_line_foot{point,a,b}、point_plane_foot{point,a,b,c}、plane_normal{a,b,c}、line_plane_angle{from,to,a,b,c}、tetrahedron_volume{a,b,c,d}。' +
+  '平面距离和角度可调用 math_measure({operation:"distance",from:{x,y},to:{x,y}}) 或 math_measure({operation:"angle",from:{x,y},vertex:{x,y},to:{x,y}})。' +
+  'math_plot({expression,probes}) 仅为安全算术函数采样，视窗x、y均为[-10,10]，不是隐式直线、3D作图或符号代数系统；数值采样不能证明极值、区间端点或恒等式。' +
+  '不把模型口算当作工具结果，不声称使用不存在的工具，不用任意代码补出答案。近似量标注近似并保留6位小数；参考解析与评分仅保留在宿主参考侧，不泄漏到学生场景。'
+
+export const GEOMETRY_TEMPLATE_CATALOG: readonly GeometryTemplateDescriptor[] = [
+  {
+    id: 'vector-angle-orthogonality',
+    title: '空间向量：夹角与组合垂直',
+    prompt:
+      '生成一道新的空间向量练习：由三点坐标得到两个非零且不共线的向量，求有向向量夹角余弦，再求两线性组合垂直时的全部实参数。保留钝角余弦的负号，并核验每个根对应的两向量非零。使用 vector-angle-orthogonality 模板，参数可从默认值调整。',
+    defaultParameters: { aX: 2, bX: -3, bZ: 2, mix: 3 },
+    parameterDescriptions: {
+      aX: '整数1～6；a=(aX,1,0)，保证a非零。',
+      bX: '非零整数−6～6；b=(bX,0,bZ)，符号控制有向夹角的锐钝。',
+      bZ: '整数1～6；保证b非零且a、b不共线。',
+      mix: '整数1～4；垂直条件为(ka+b)·(ka−mix·b)=0。',
+    },
+    generationInstructions:
+      '由坐标差构造a、b；用 vector_metrics 的数量积、模长、余弦核验。二次方程判别式必须严格为正；两个根都代回且不能产生零向量。向量夹角取[0°,180°]，不要擅自对数量积取绝对值。',
+  },
+  {
+    id: 'triangle-altitude-parallel',
+    title: '平面直线：高线与过垂足的平行线',
+    prompt:
+      '生成一道新的非退化三角形解析几何练习：求顶点到底边所在直线的高线、垂足，以及过垂足且平行于另一边的直线。使用 triangle-altitude-parallel 模板；给定图只画三角形，垂足与辅助线由学生构造。允许水平底边，不用斜率除零。',
+    defaultParameters: { run: 4, rise: 2, footFraction: 0.25, height: 1, offsetX: -2, offsetY: -1 },
+    parameterDescriptions: {
+      run: '整数1～8；底边方向的x分量。',
+      rise: '整数−6～6；底边方向的y分量，可为0。',
+      footFraction: '0.25、0.5或0.75；垂足在底边内部的位置，编译器构造时使用，不直接写入题干。',
+      height: '整数1～4；顶点沿底边法向量的倍数，非几何高的长度。',
+      offsetX: '整数−5～5；底边起点x坐标。',
+      offsetY: '整数−5～5；底边起点y坐标。',
+    },
+    generationInstructions:
+      '底边向量u=(run,rise)，A=B+footFraction·u+height·(−rise,run)，故有向二倍面积不为0。参数还须联合满足A、B、C的全部x、y坐标在[-10,10]内，以适配平面画板；不满足时减少height、run、rise或调整偏移。用 geometry_calculate({request:{operation:"point_line_foot",point:A,a:B,b:C}}) 核验垂足。直线采用一般式，支持竖直高线；求过D平行于AC的直线，不能误交付AC本身。',
+  },
+  {
+    id: 'oblique-parallelepiped',
+    title: '斜平行六面体：长度与棱间角',
+    prompt:
+      '生成一道新的斜平行六面体练习：底面相邻棱垂直，但侧棱与两条底棱均不垂直；在对侧棱上给定一个内分点，求从底顶点到该点的长度，以及此线与一条底棱所成角的余弦。使用 oblique-parallelepiped 模板，保留全部数量积交叉项，不能画成长方体。',
+    defaultParameters: { baseA: 4, baseB: 6, side: 5, leanX: 0.5, leanY: 0.25, edgeFraction: 0.25 },
+    parameterDescriptions: {
+      baseA: '整数2～10；底棱AB的长度。',
+      baseB: '整数2～10；底棱AD的长度。',
+      side: '整数2～10；侧棱AA₁的长度。',
+      leanX: '0.25或0.5；cos∠BAA₁，非零以保留斜棱。',
+      leanY: '0.25或0.5；cos∠DAA₁，非零以保留斜棱。',
+      edgeFraction: '0.25、0.5或0.75；CE/CC₁，点E是明确给定的点。',
+    },
+    generationInstructions:
+      '构造a=(baseA,0,0)、b=(0,baseB,0)、c=side·(leanX,leanY,√(1−leanX²−leanY²))。Gram行列式=(baseA·baseB·side)²(1−leanX²−leanY²)>0，拒绝退化或不可能的角。AE=a+b+edgeFraction·c。线线夹角使用数量积绝对值，角范围[0°,90°]；图与数值必须共用同一c。',
+  },
+  {
+    id: 'square-pyramid-locus',
+    title: '正方形底面棱锥：垂直、体积与动面角范围',
+    prompt:
+      '生成一道新的正方形底面四棱锥练习，包含：由两个侧面均垂直底面证明公共侧棱垂直底面；由面面夹角确定棱上内点并求三棱锥体积；让H在整个指定平面内运动，求线面角正弦的完整范围并证明开闭端点。使用 square-pyramid-locus 模板。不要把整个平面缩成侧面三角形，给定图只含P、A、B、C、D、E，不提前画出待求F、G或最值位置H。',
+    defaultParameters: { side: 5 },
+    parameterDescriptions: {
+      side: '整数2～12；正方形边长及第二问的PA长度。E满足PE/PD=1/3；平面AEF与底面的较小夹角余弦固定为1/3。仅缩放，不使用未经证明的任意比例。',
+    },
+    generationInstructions:
+      'PA的垂直性必须先论证，再建立正交坐标。设t=PF/PC∈(0,1)，PE/PD=1/3，使用plane_normal、tetrahedron_volume或line_plane_angle做数值交叉核验。主程序解析确定唯一内点，排除端点根；H的两个平面参数不限制为非负。通过配方、非零性、无穷远极限和连续性证明完整范围，不能用math_plot的有限采样代替证明。',
+  },
+]
+
+/** Plain-text export is usable in the workbench without exposing reference answers. */
+export function geometryTemplatePrompt(id: GeometryTemplateId): string {
+  const template = GEOMETRY_TEMPLATE_CATALOG.find((item) => item.id === id)
+  if (!template) throw new Error('未知几何出题模板')
+  return [
+    template.prompt,
+    GEOMETRY_GENERATION_INSTRUCTIONS,
+    template.generationInstructions,
+    `默认调用：generate_geometry_question(${JSON.stringify({ templateId: id, parameters: template.defaultParameters })})`,
+    `参数限制：${Object.entries(template.parameterDescriptions)
+      .map(([key, description]) => `${key}：${description}`)
+      .join('；')}`,
+  ].join('\n')
+}

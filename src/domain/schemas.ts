@@ -1,3 +1,4 @@
+import { geometrySceneSchema } from '../shared/geometry'
 import { submissionAssistanceSchema } from '../shared/learning-graph'
 import { terrainExerciseSchema } from './terrain-exercise'
 import { assertArgumentGroups } from './argument-groups'
@@ -67,6 +68,7 @@ export const questionSchema = z
     maxScore: z.number().int().min(1).max(100),
     explanation: z.string().trim().min(1).max(20000),
     figure: geographyFigureSchema.optional(),
+    geometry: geometrySceneSchema.optional(),
     terrain: terrainExerciseSchema.optional(),
     provenance: questionProvenanceSchema.optional(),
     researchOrigin: questionResearchOriginSchema.optional(),
@@ -86,6 +88,7 @@ export const questionSchema = z
     if ((question.figure || question.terrain) && question.subject !== 'geography')
       fail('示意图只适用于地理题')
     if (question.figure && question.terrain) fail('题目不能同时包含普通示意图与模拟地形')
+    if (question.geometry && question.subject !== 'math') fail('几何场景只适用于数学题')
     if (!uniqueIds(question.choices) || !uniqueIds(question.blocks) || !uniqueIds(question.rubric))
       fail('选项、模块和评分项的标识符必须各自唯一')
     if (question.kind === 'choice') {
@@ -152,6 +155,18 @@ export const drawingSchema = z
 
 export const mathWorkbenchSchema = z
   .strictObject({
+    geometry: geometrySceneSchema.optional(),
+    rightAngles: z
+      .array(
+        z.strictObject({
+          id: idSchema,
+          vertex: idSchema,
+          from: idSchema,
+          to: idSchema,
+        }),
+      )
+      .max(100)
+      .optional(),
     drawing: drawingSchema.refine(
       (drawing) => drawing.mode === 'cartesian',
       '数学工具需要直角坐标系',
@@ -186,6 +201,30 @@ export const mathWorkbenchSchema = z
   })
   .superRefine((math, ctx) => {
     const ids = new Set(math.drawing.points.map((point) => point.id))
+    if (math.rightAngles) {
+      const points = new Map(math.drawing.points.map((point) => [point.id, point]))
+      if (
+        !uniqueIds(math.rightAngles) ||
+        math.rightAngles.some((marker) => {
+          const v = points.get(marker.vertex),
+            a = points.get(marker.from),
+            b = points.get(marker.to)
+          if (!v || !a || !b || new Set([marker.vertex, marker.from, marker.to]).size !== 3)
+            return true
+          const ax = a.x - v.x,
+            ay = a.y - v.y,
+            bx = b.x - v.x,
+            by = b.y - v.y
+          const scale = Math.hypot(ax, ay) * Math.hypot(bx, by)
+          return scale < 1e-12 || Math.abs(ax * bx + ay * by) > 1e-8 * scale
+        })
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: ['rightAngles'],
+          message: '直角标记须引用已有不同点，并满足非退化垂直关系',
+        })
+    }
     if (
       new Set(math.measurement).size !== math.measurement.length ||
       math.measurement.some((id) => !ids.has(id))

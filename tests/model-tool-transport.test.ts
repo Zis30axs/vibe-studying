@@ -152,13 +152,21 @@ function addUnsupported(protocol: ModelProtocol, envelope: any) {
 }
 
 describe.each(protocols)('%s native tools (synthetic fetch only)', (protocol) => {
-  it('accepts eighteen bounded definitions including formula tools and rejects a nineteenth before sending', async () => {
-    const tools = Array.from({ length: 18 }, (_, index) => ({
+  it('accepts twenty bounded definitions including geometry tools and rejects a twenty-first before sending', async () => {
+    const tools = Array.from({ length: 20 }, (_, index) => ({
       ...definitions[0],
       name:
-        index === 16 ? 'search_formulas' : index === 17 ? 'get_formula' : `read_fixture_${index}`,
+        index === 16
+          ? 'search_formulas'
+          : index === 17
+            ? 'get_formula'
+            : index === 18
+              ? 'geometry_calculate'
+              : index === 19
+                ? 'generate_geometry_question'
+                : `read_fixture_${index}`,
     }))
-    expect(TOOL_TRANSPORT_LIMITS.definitions).toBe(18)
+    expect(TOOL_TRANSPORT_LIMITS.definitions).toBe(20)
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(finalEnvelope(protocol)))
     await expect(
       new ModelToolTransport(config(protocol), key, fetcher).start('System', {}, tools),
@@ -168,7 +176,7 @@ describe.each(protocols)('%s native tools (synthetic fetch only)', (protocol) =>
     await expect(
       new ModelToolTransport(config(protocol), key, denied).start('System', {}, [
         ...tools,
-        { ...definitions[0], name: 'nineteenth' },
+        { ...definitions[0], name: 'twenty_first' },
       ]),
     ).rejects.toBeInstanceOf(ModelTransportError)
     expect(denied).not.toHaveBeenCalled()

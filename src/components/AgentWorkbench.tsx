@@ -1,3 +1,5 @@
+import { GEOMETRY_TEMPLATE_CATALOG } from '../shared/geometry-templates'
+import { GeometryFigure } from './GeometryFigure'
 import type { FormulaReferenceReceipt } from '../shared/formula-tools'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { AgentRunRequest, AgentRunState, AgentWorkbenchApi } from '../shared/agent-workbench'
@@ -187,6 +189,7 @@ export function AgentProposalContent({ proposal }: { proposal: AgentToolProposal
       </p>
       <h4>{q.title}</h4>
       <p className="agent-plain-text">{q.prompt}</p>
+      {q.geometry && <GeometryFigure scene={q.geometry} />}
       <p>
         {subjectLabel[q.subject]} · {q.maxScore} 分 · {q.source}
       </p>
@@ -540,6 +543,25 @@ export function AgentWorkbench({
               </select>
             </label>
           </div>
+          {subject === 'math' && mode === 'create' && (
+            <section className="agent-geometry-templates" aria-label="内置几何出题">
+              <p className="agent-muted">
+                直接写“出一道空间向量题”即可。Agent
+                会自动使用内置题型方法与合法参数，调用本地工具生成题干和配图；你开始任务并确认模型发送后才运行，保存仍需确认预览。无需复制提示词。
+              </p>
+              <details>
+                <summary>查看内置几何题型</summary>
+                <ul>
+                  {GEOMETRY_TEMPLATE_CATALOG.map((entry) => (
+                    <li key={entry.id}>{entry.title}</li>
+                  ))}
+                </ul>
+                <p className="agent-muted">
+                  分值是新练习自设的教学配置；学生题面不含参考答案。可在工具列表关闭“参数化几何出题”，关闭后不会发送这份出题策略。
+                </p>
+              </details>
+            </section>
+          )}
           <div className="agent-scope-summary">
             <strong>题目范围：仅当前题目</strong>
             <p>

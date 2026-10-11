@@ -40,6 +40,14 @@ export const AGENT_TOOL_LABELS: Record<AgentToolName, { label: string; descripti
     description: '安全算术表达式的有限数值采样，不生成图像或证明。',
   },
   math_measure: { label: '数学测量', description: '平面两点距离、三点夹角。' },
+  geometry_calculate: {
+    label: '空间几何与垂足计算',
+    description: '真实三维坐标的向量、垂足、线面角与体积；有界本地计算。',
+  },
+  generate_geometry_question: {
+    label: '参数化几何出题',
+    description: '四类原创提示模板，输入有界参数，由本地工具计算并隔离参考答案，确认后入库。',
+  },
   geography_measure: { label: '地理测量', description: '球面距离、比例尺换算和平均坡度。' },
   terrain_calculate: {
     label: '模拟地形计算',
@@ -87,6 +95,9 @@ export const AGENT_DEFAULT_TOOLS: AgentToolName[] = [
   'resolve_knowledge',
   'math_plot',
   'math_measure',
+  'geometry_calculate',
+  // This default is visible only in math/create; it stages a preview and never saves.
+  'generate_geometry_question',
   'geography_measure',
   'terrain_calculate',
 ]
@@ -109,7 +120,8 @@ export function availableAgentTools(scope: AgentToolUiScope): AgentToolName[] {
     if (name === 'search_formulas' || name === 'get_formula')
       return scope.subject === 'math' || scope.subject === 'geography'
     if (name === 'search_knowledge' || name === 'resolve_knowledge') return scope.hasKnowledge
-    if (['math_plot', 'math_measure'].includes(name)) return scope.subject === 'math'
+    if (['math_plot', 'math_measure', 'geometry_calculate'].includes(name))
+      return scope.subject === 'math'
     if (['geography_measure', 'terrain_calculate'].includes(name))
       return scope.subject === 'geography'
     if (name === 'review_answer')
@@ -122,6 +134,8 @@ export function availableAgentTools(scope: AgentToolUiScope): AgentToolName[] {
     if (name === 'advise_selection') return scope.hasQuestion
     if (name === 'review_modules')
       return scope.hasQuestion && scope.includeAnswer && scope.hasModules
+    if (name === 'generate_geometry_question')
+      return scope.mode === 'create' && scope.subject === 'math'
     if (name === 'generate_question')
       return scope.mode === 'create' && scope.subject === 'geography'
     if (name === 'propose_question') return scope.mode === 'create'

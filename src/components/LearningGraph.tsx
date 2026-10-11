@@ -45,6 +45,8 @@ const toolLabels: Record<string, string> = {
   get_formula: '公式读取',
   math_measure: '数学测量',
   geography_measure: '地理测量',
+  geometry_calculate: '空间几何计算',
+  generate_geometry_question: '几何模板出题',
   terrain_calculate: '地形计算',
   review_answer: '委派作答审阅',
   advise_selection: '委派选区提示',

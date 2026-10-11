@@ -361,3 +361,52 @@ test('network URLs fail closed and a remount still starts offline with remembere
   ).not.toBeChecked()
   expect(await page.evaluate(() => window.agentFixture.starts)).toBe(0)
 })
+
+test('ordinary math creation request automatically enables local geometry generation without copying prompts', async ({
+  page,
+}) => {
+  await openFixture(page)
+  await page.getByLabel('工作模式', { exact: true }).selectOption('create')
+  await expect(page.getByRole('region', { name: '内置几何出题', exact: true })).toContainText(
+    '无需复制提示词',
+  )
+  await expect(page.getByRole('checkbox', { name: '参数化几何出题', exact: false })).toBeChecked()
+  await page.getByRole('textbox', { name: '本次任务', exact: true }).fill('出一道空间向量题')
+  await expect(page.getByRole('textbox', { name: '配套出题提示词（可复制）' })).toHaveCount(0)
+  expect(
+    await page.evaluate(() => [window.agentFixture.starts, window.agentFixture.saves]),
+  ).toEqual([0, 0])
+  await expect(page.getByRole('button', { name: startLabel, exact: true })).toBeDisabled()
+  await page.getByRole('checkbox', { name: parentConsent, exact: true }).check()
+  await page.getByRole('button', { name: startLabel, exact: true }).click()
+  expect(await page.evaluate(() => window.agentFixture.lastRequest?.allowedTools)).toContain(
+    'generate_geometry_question',
+  )
+  expect(await page.evaluate(() => window.agentFixture.lastRequest?.task)).toBe('出一道空间向量题')
+  await expect(page.getByRole('checkbox', { name: '参数化几何出题', exact: false })).toBeDisabled()
+  await page.getByRole('button', { name: '取消任务', exact: true }).click()
+})
+
+test('geometry creation capability respects explicit disable and stays absent from other scopes', async ({
+  page,
+}) => {
+  await openFixture(page)
+  await page.getByRole('textbox', { name: '本次任务', exact: true }).fill('保留普通任务原文')
+  await page.getByLabel('工作模式', { exact: true }).selectOption('create')
+  await page.getByRole('checkbox', { name: '参数化几何出题', exact: false }).uncheck()
+  await page.getByText('查看内置几何题型', { exact: true }).click()
+  await expect(
+    page.getByRole('checkbox', { name: '参数化几何出题', exact: false }),
+  ).not.toBeChecked()
+  await expect(page.getByRole('textbox', { name: '本次任务', exact: true })).toHaveValue(
+    '保留普通任务原文',
+  )
+  await page.getByLabel('工作模式', { exact: true }).selectOption('learner')
+  await expect(page.getByRole('checkbox', { name: '参数化几何出题', exact: false })).toHaveCount(0)
+  await page.getByLabel('学科', { exact: true }).selectOption('history')
+  await page.getByLabel('工作模式', { exact: true }).selectOption('create')
+  await expect(page.getByRole('region', { name: '内置几何出题', exact: true })).toHaveCount(0)
+  expect(
+    await page.evaluate(() => [window.agentFixture.starts, window.agentFixture.saves]),
+  ).toEqual([0, 0])
+})

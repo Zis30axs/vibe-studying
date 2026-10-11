@@ -1,3 +1,4 @@
+import { geometrySceneSchema, type GeometryScene } from '../shared/geometry'
 import { terrainExerciseSchema, terrainExerciseEvidence } from '../domain/terrain-exercise'
 import type { TerrainExercise } from '../shared/terrain'
 import { geographyFigureSchema } from '../domain/geography-figure'
@@ -15,6 +16,7 @@ import type {
 
 /** These payloads are built only in the trusted process. No conversation/state object is accepted. */
 export interface AdvisorQuestionContext {
+  geometry?: GeometryScene
   figure?: GeographyFigure
   terrain?: TerrainExercise
   terrainEvidence?: ReturnType<typeof terrainExerciseEvidence>
@@ -56,6 +58,7 @@ function advisorQuestion(question: Question, includeReference: boolean): Advisor
   return {
     subject: question.subject,
     prompt: question.prompt,
+    ...(question.geometry ? { geometry: geometrySceneSchema.parse(question.geometry) } : {}),
     ...(question.figure ? { figure: geographyFigureSchema.parse(question.figure) } : {}),
     ...(question.terrain ? { terrain: terrainExerciseSchema.parse(question.terrain) } : {}),
     ...(question.choices
@@ -152,6 +155,7 @@ export function buildGradingContext(question: Question, draft: AnswerDraft, syll
       subject: question.subject,
       title: question.title,
       prompt: question.prompt,
+      ...(question.geometry ? { geometry: geometrySceneSchema.parse(question.geometry) } : {}),
       ...(question.figure ? { figure: geographyFigureSchema.parse(question.figure) } : {}),
       ...(question.terrain
         ? {
@@ -202,6 +206,19 @@ export function buildGradingContext(question: Question, draft: AnswerDraft, syll
       ...(question.subject === 'math' && draft.math
         ? {
             math: {
+              ...(draft.math.geometry
+                ? { geometry: geometrySceneSchema.parse(draft.math.geometry) }
+                : {}),
+              ...(draft.math.rightAngles
+                ? {
+                    rightAngles: draft.math.rightAngles.map(({ id, vertex, from, to }) => ({
+                      id,
+                      vertex,
+                      from,
+                      to,
+                    })),
+                  }
+                : {}),
               expression: draft.math.expression,
               parameters: {
                 a: draft.math.parameters.a,

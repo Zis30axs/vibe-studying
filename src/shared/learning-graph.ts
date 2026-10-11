@@ -44,6 +44,8 @@ export const traceTools = [
   'web_fetch',
   'math_plot',
   'math_measure',
+  'geometry_calculate',
+  'generate_geometry_question',
   'geography_measure',
   'terrain_calculate',
   'review_answer',

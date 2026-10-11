@@ -1,3 +1,8 @@
+import { randomUUID } from 'node:crypto'
+import { geometryToolInputSchema } from '../src/shared/geometry'
+import { executeGeometryTool } from '../src/domain/geometry'
+import { compileGeometryTemplate } from '../src/domain/geometry-templates'
+import { geometryTemplateToolSchema } from '../src/shared/geometry-templates'
 import { FORMULA_CATALOG_VERSION } from '../src/domain/formula-catalog'
 import { getFormula, searchFormulas } from '../src/domain/formula-reference'
 import {
@@ -167,6 +172,34 @@ export function createExamCraftMcpServer(
         annotations,
       },
       async (input) => run(async () => ({ result: executeTerrainTool(input) })),
+    )
+  }
+  if (referenceAccess === 'full' && (!allowedScope.subject || allowedScope.subject === 'math')) {
+    server.registerTool(
+      'geometry_calculate',
+      {
+        title: '计算三维几何与垂足',
+        description:
+          '有界本地几何计算器。使用真实xyz坐标，支持向量角、垂足、线面角及体积；拒绝退化输入，不联网、不执行代码、不修改题库。计算结果可能揭示答案，仅限启动时full教学权限。',
+        inputSchema: geometryToolInputSchema,
+        annotations,
+      },
+      async (input) => run(async () => ({ result: executeGeometryTool(input) })),
+    )
+    server.registerTool(
+      'generate_geometry_question',
+      {
+        title: '生成参数化几何题',
+        description:
+          '四类原创几何提示模板的本地编译器：只收有界模板参数，宿主计算真实三维场景和参考解，返回完整待审核题目，不保存题库。含参考答案，仅限启动时full教学权限；student不可通过参数扩大权限。',
+        inputSchema: geometryTemplateToolSchema,
+        annotations,
+      },
+      async (input) =>
+        run(async () => ({
+          question: compileGeometryTemplate(input, `geometry-${randomUUID()}`),
+          saved: false,
+        })),
     )
   }
   return server

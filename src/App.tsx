@@ -1,3 +1,4 @@
+import { GeometryFigure } from './components/GeometryFigure'
 import { LearningGraph } from './components/LearningGraph'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { version as appVersion } from '../package.json'
@@ -122,7 +123,9 @@ export function Review({
       {question ? (
         <details className="review-question-figure">
           <summary>
-            {question.figure || question.terrain ? '本次题目与示意图快照' : '本次题目快照'}
+            {question.figure || question.terrain || question.geometry
+              ? '本次题目与示意图快照'
+              : '本次题目快照'}
           </summary>
           <h3>{question.title}</h3>
           <p>{question.prompt}</p>
@@ -131,6 +134,7 @@ export function Review({
               {choice.id}. {choice.text}
             </p>
           ))}
+          {question.geometry && <GeometryFigure scene={question.geometry} />}
           {question.figure && <GeographyFigure figure={question.figure} />}
           {question.terrain && (
             <>
@@ -913,6 +917,7 @@ export default function App() {
                           <div className="question-prompt" data-advisor-source="question">
                             <h2>{selected.title}</h2>
                             <p>{selected.prompt}</p>
+                            {selected.geometry && <GeometryFigure scene={selected.geometry} />}
                             {selected.figure && <GeographyFigure figure={selected.figure} />}
                             {selected.terrain && <TerrainFigure exercise={selected.terrain} />}
                             {selected.provenance?.kind === 'ai-generated' && (

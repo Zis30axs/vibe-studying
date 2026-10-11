@@ -1,0 +1,195 @@
+.geometry-workbench {
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid #d5dfe9;
+  color: #294858;
+}
+.geometry-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.geometry-heading h4 {
+  margin: 7px 0;
+  font-size: 17px;
+}
+.geometry-heading > span {
+  color: #667988;
+  font-size: 12px;
+}
+.geometry-figure {
+  margin: 12px 0;
+  min-width: 0;
+}
+.geometry-canvas {
+  display: block;
+  width: 100%;
+  border: 1px solid #d7e2ed;
+  border-radius: 10px;
+}
+.geometry-canvas text {
+  font:
+    600 14px system-ui,
+    sans-serif;
+}
+.geometry-axes line {
+  stroke-width: 1.1;
+}
+.geometry-faces polygon {
+  fill: #98aec9;
+  fill-opacity: 0.15;
+  stroke: #9fb7cc;
+  stroke-opacity: 0.4;
+}
+.geometry-segments line {
+  stroke: #315979;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+.geometry-right-angles polyline {
+  stroke: #bd7843;
+  stroke-width: 1.8;
+  fill: none;
+}
+.geometry-points circle {
+  fill: #365da6;
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+.geometry-points text {
+  fill: #203f5d;
+  stroke: #f9fbff;
+  stroke-width: 3px;
+  paint-order: stroke;
+  stroke-linejoin: round;
+}
+.geometry-figure figcaption,
+.geometry-help {
+  font-size: 11px;
+  color: #637786;
+  line-height: 1.7;
+}
+.geometry-figure figcaption {
+  margin-top: 8px;
+}
+.geometry-actions,
+.geometry-view-presets,
+.geometry-point-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 10px 0;
+}
+.geometry-figure button,
+.geometry-workbench button {
+  border: 1px solid #c9d7e4;
+  background: #fff;
+  color: #345873;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.geometry-figure button:disabled,
+.geometry-workbench button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.geometry-point-list button[aria-pressed='true'] {
+  color: #fff;
+  background: #395e86;
+  border-color: #395e86;
+}
+.geometry-view-controls,
+.geometry-editors {
+  border: 1px solid #d6e1eb;
+  border-radius: 8px;
+  min-width: 0;
+  padding: 9px 12px;
+  margin: 12px 0;
+}
+.geometry-view-controls legend,
+.geometry-editors legend {
+  font-size: 12px;
+  color: #516b80;
+  padding: 0 5px;
+}
+.geometry-view-controls > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 5px 16px 5px 0;
+  font-size: 12px;
+}
+.geometry-view-controls input[type='range'] {
+  min-width: 100px;
+  max-width: 170px;
+  accent-color: #5879a5;
+  padding: 0;
+}
+.geometry-editors form {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+.geometry-editors label {
+  flex: 1;
+  min-width: 75px;
+  font-size: 12px;
+}
+.geometry-editors input,
+.geometry-editors select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #cbd7e2;
+  border-radius: 5px;
+  color: #294858;
+  background: white;
+  padding: 8px;
+  margin-top: 5px;
+}
+.geometry-editors .geometry-check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding-bottom: 8px;
+  flex: 0 0 auto;
+}
+.geometry-check input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+.geometry-message {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #8b482b;
+}
+.geometry-confirm {
+  background: #fff1dc;
+  padding: 12px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+.geometry-confirm button {
+  margin-left: 8px;
+}
+.geometry-figure :focus-visible,
+.geometry-workbench :focus-visible {
+  outline: 3px solid #b587eb;
+  outline-offset: 2px;
+}
+@media (max-width: 650px) {
+  .geometry-heading {
+    display: block;
+  }
+  .geometry-editors form > label {
+    flex-basis: 30%;
+  }
+  .geometry-editors form > label:first-child {
+    flex-basis: 100%;
+  }
+}

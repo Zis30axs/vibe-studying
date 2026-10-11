@@ -1,3 +1,4 @@
+import type { GeometryScene } from './geometry'
 import type { ReviewKnowledgeApi } from './review-knowledge'
 import type { WebResearchApi } from './web-research'
 import type { LearningGraphApi } from './learning-graph'
@@ -108,6 +109,8 @@ export interface Question {
   maxScore: number
   explanation: string
   figure?: GeographyFigure
+  /** Bounded numerical geometry, with no answer or metric fields. */
+  geometry?: GeometryScene
   terrain?: TerrainExercise
   provenance?: QuestionProvenance
   /** Host-assigned generation/source labels. These never verify authenticity as a past exam. */
@@ -132,6 +135,7 @@ export type StudentQuestion = Pick<
   | 'maxScore'
   | 'choices'
   | 'figure'
+  | 'geometry'
   | 'terrain'
   | 'provenance'
   | 'researchOrigin'
@@ -169,6 +173,8 @@ export interface MathParameters {
   c: number
 }
 export interface MathWorkbenchState {
+  geometry?: GeometryScene
+  rightAngles?: { id: string; vertex: string; from: string; to: string }[]
   drawing: GeoDrawing
   expression: string
   parameters: MathParameters

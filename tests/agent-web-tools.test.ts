@@ -107,8 +107,8 @@ const proposal = () => ({
 })
 
 describe('bounded public web tools', () => {
-  it('has an exact eighteen-tool allowlist and requires scope, consent, callbacks and trusted inventory', async () => {
-    expect(AGENT_TOOL_NAMES).toHaveLength(18)
+  it('has an exact twenty-tool allowlist and requires scope, consent, callbacks and trusted inventory', async () => {
+    expect(AGENT_TOOL_NAMES).toHaveLength(20)
     for (const [input, callback] of [
       [context({ web: undefined }), adapters()],
       [context({ web: { scope: scope(), consent: false } }), adapters()],

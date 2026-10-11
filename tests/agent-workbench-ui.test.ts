@@ -149,9 +149,14 @@ const scope = (extra: Partial<AgentToolUiScope> = {}): AgentToolUiScope => ({
 })
 
 describe('Agent renderer capability and consent scope', () => {
-  it('defaults to pure reads/computation without delegated calls or writes', () => {
+  it('defaults to reads/computation and a math-create-only staged generator without delegated calls or writes', () => {
     expect(AGENT_DEFAULT_TOOLS.some((name) => AGENT_DELEGATE_TOOLS.includes(name))).toBe(false)
     expect(AGENT_DEFAULT_TOOLS).not.toContain('propose_answer_edit')
+    expect(AGENT_DEFAULT_TOOLS).toContain('generate_geometry_question')
+    expect(availableAgentTools(scope({ mode: 'create' }))).toContain('generate_geometry_question')
+    expect(availableAgentTools(scope({ mode: 'review' }))).not.toContain(
+      'generate_geometry_question',
+    )
     expect(availableAgentTools(scope())).toEqual([
       'list_questions',
       'get_question',
@@ -159,6 +164,7 @@ describe('Agent renderer capability and consent scope', () => {
       'get_formula',
       'math_plot',
       'math_measure',
+      'geometry_calculate',
     ])
     expect(availableAgentTools(scope({ subject: 'geography' }))).toEqual([
       'list_questions',

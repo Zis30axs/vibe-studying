@@ -1,3 +1,7 @@
+import { geometryToolInputSchema } from '../shared/geometry'
+import { executeGeometryTool } from '../domain/geometry'
+import { compileGeometryTemplate } from '../domain/geometry-templates'
+import { geometryTemplateToolSchema } from '../shared/geometry-templates'
 import { FORMULA_CATALOG_VERSION } from '../domain/formula-catalog'
 import { getFormula, searchFormulas } from '../domain/formula-reference'
 import type { FormulaEntry } from '../shared/formula-reference'
@@ -249,6 +253,8 @@ const schemas = {
     }),
   ]),
   terrain_calculate: terrainToolInputSchema,
+  geometry_calculate: geometryToolInputSchema,
+  generate_geometry_question: geometryTemplateToolSchema,
   review_answer: z.strictObject({ mode: z.enum(['local', 'remote']) }),
   advise_selection: z.strictObject({
     selectedText: z.string().trim().min(1).max(8000),
@@ -284,6 +290,10 @@ const descriptions: Record<AgentToolName, string> = {
     '使用安全算术语法解析并采样函数；非JavaScript或符号代数。曲线仅在x和y均[-10,10]视窗内，固定采样，断点不连接；额外探测最多8个x，非有限值返回null。结果仅为数值采样，不能证明连续性或极值。',
   math_measure:
     '计算笛卡尔平面两点欧氏距离（坐标单位）或三点夹角（度，vertex为顶点）。重合点夹角未定义，返回null。',
+  geometry_calculate:
+    '真实三维笛卡尔坐标的确定性本地计算，输入request.operation及有界坐标：向量内积/角、点到线或面的垂足、线面角、四面体体积。零向量与退化平面拒绝；vector角0到180度，线面角0到90度。只返回数值不修改图。二维坐标以z=0输入。',
+  generate_geometry_question:
+    '仅数学create模式：依据四种原创几何提示模板和有界参数本地编译题干、真实三维图与参考解；无需额外模型请求。不得传图像、自由SVG、答案或评分。只返回学生版预览及建议ID，参考解留在宿主待确认，确认前不保存。可使用模板默认参数或按schema选有效参数；每题一次调用即可，不需要另调propose_question。',
   geography_measure:
     '地理教学数值工具：great_circle为平均半径6371008.8m球面大圆距离及起始方位角，非精确椭球测地线；map_scale把图上厘米和1:N比例换算为米；slope为端点高差/水平距离的平均坡度，非路径局部坡度。',
   terrain_calculate:
@@ -365,6 +375,9 @@ export function createAgentToolRegistry(input: AgentToolContext, adapters: Agent
         !!adapters.reviewModules &&
         (!context.includeReference || childReferencesAllowed())
       )
+    if (name === 'geometry_calculate') return context.subject === 'math'
+    if (name === 'generate_geometry_question')
+      return context.subject === 'math' && context.mode === 'create' && !!adapters.onProposal
     if (name === 'generate_question')
       return (
         context.subject === 'geography' &&
@@ -722,6 +735,8 @@ export function createAgentToolRegistry(input: AgentToolContext, adapters: Agent
             'mean-radius spherical great-circle (haversine); approximate, not an ellipsoidal geodesic; bearing undefined for coincident/antipodal points or polar origin',
         }
       }
+      case 'geometry_calculate':
+        return executeGeometryTool(schemas.geometry_calculate.parse(args))
       case 'terrain_calculate':
         return executeTerrainTool(schemas.terrain_calculate.parse(args))
       case 'review_answer': {
@@ -866,6 +881,35 @@ export function createAgentToolRegistry(input: AgentToolContext, adapters: Agent
           }
         } catch {
           return fail('invalid_result')
+        }
+      }
+      case 'generate_geometry_question': {
+        const parameters = schemas.generate_geometry_question.parse(args)
+        let question: Question
+        try {
+          question = questionSchema.parse(
+            compileGeometryTemplate(parameters, `geometry-${randomUUID()}`),
+          )
+        } catch {
+          return fail('invalid_arguments')
+        }
+        const preview = studentQuestionSchema.parse(studentQuestionProjection(question))
+        assertBoundedJson(
+          preview,
+          AGENT_TOOL_LIMITS.resultBytes - 1000,
+          AGENT_TOOL_LIMITS.resultNodes,
+        )
+        const { proposalId } = z
+          .strictObject({ proposalId: idSchema })
+          .parse(
+            await adapters.onProposal!({ kind: 'question', question: structuredClone(question) }),
+          )
+        return {
+          proposalId,
+          kind: 'question',
+          question: preview,
+          saved: false,
+          method: 'local-parametric-geometry-v1',
         }
       }
       case 'generate_question': {
