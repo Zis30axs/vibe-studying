@@ -134,6 +134,7 @@ test('normal run sends only chosen scope and displays real result metadata as es
     'get_formula',
     'math_plot',
     'math_measure',
+    'geometry_calculate',
   ])
   await page.evaluate(() => window.agentFixture.finish())
   await expect(page.getByText('<script>plain model output</script>', { exact: true })).toBeVisible()
@@ -366,7 +367,7 @@ test('ordinary math creation request automatically enables local geometry genera
   page,
 }) => {
   await openFixture(page)
-  await page.getByLabel('工作模式', { exact: true }).selectOption('create')
+  await page.getByRole('combobox', { name: '工作模式', exact: true }).selectOption('create')
   await expect(page.getByRole('region', { name: '内置几何出题', exact: true })).toContainText(
     '无需复制提示词',
   )
@@ -392,7 +393,7 @@ test('geometry creation capability respects explicit disable and stays absent fr
 }) => {
   await openFixture(page)
   await page.getByRole('textbox', { name: '本次任务', exact: true }).fill('保留普通任务原文')
-  await page.getByLabel('工作模式', { exact: true }).selectOption('create')
+  await page.getByRole('combobox', { name: '工作模式', exact: true }).selectOption('create')
   await page.getByRole('checkbox', { name: '参数化几何出题', exact: false }).uncheck()
   await page.getByText('查看内置几何题型', { exact: true }).click()
   await expect(
@@ -401,10 +402,10 @@ test('geometry creation capability respects explicit disable and stays absent fr
   await expect(page.getByRole('textbox', { name: '本次任务', exact: true })).toHaveValue(
     '保留普通任务原文',
   )
-  await page.getByLabel('工作模式', { exact: true }).selectOption('learner')
+  await page.getByRole('combobox', { name: '工作模式', exact: true }).selectOption('learner')
   await expect(page.getByRole('checkbox', { name: '参数化几何出题', exact: false })).toHaveCount(0)
-  await page.getByLabel('学科', { exact: true }).selectOption('history')
-  await page.getByLabel('工作模式', { exact: true }).selectOption('create')
+  await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('history')
+  await page.getByRole('combobox', { name: '工作模式', exact: true }).selectOption('create')
   await expect(page.getByRole('region', { name: '内置几何出题', exact: true })).toHaveCount(0)
   expect(
     await page.evaluate(() => [window.agentFixture.starts, window.agentFixture.saves]),
