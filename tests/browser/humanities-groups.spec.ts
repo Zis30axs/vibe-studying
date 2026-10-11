@@ -9,6 +9,7 @@ declare global {
       setDisabled(value: boolean): void
       setActive(value: boolean): void
       requests: ModuleReviewRequest[]
+      canceled: string[]
       release(): void
     }
   }
@@ -33,10 +34,10 @@ async function openFixture(page: Page) {
         roots: ['a','b','c','d'].map(id => ({ id, kind: 'analysis', text: '合成内容 ' + id, children: [] })),
         canvas: { positions: { a: { x: 40, y: 70 }, b: { x: 440, y: 70 }, c: { x: 740, y: 70 }, d: { x: 740, y: 260 } }, viewport: { x: 0, y: 0, zoom: 1 } }
       }};
-      const f = window.groupFixture = { draft: initial, requests: [], release() {} };
+      const f = window.groupFixture = { draft: initial, requests: [], canceled: [], release() {} };
       const api = {
         getModelConsents: async () => ({ version: 1, revision: 0, grants: [] }),
-        cancelModuleReview: async () => {},
+        cancelModuleReview: async requestId => { f.canceled.push(requestId); },
         reviewModules: request => { f.requests.push(structuredClone(request)); return new Promise(resolve => { f.release = () => resolve({ requestId: request.requestId, configRevision: 1, summary: '无需修改', confirmations: [], suggestions: [] }); }); }
       };
       function App() {
@@ -257,9 +258,11 @@ test('hiding the mounted workbench cancels gestures and review without losing th
   const before = await draft(page)
   await dragNode(page, 'b', 200, 10, false)
   await page.evaluate(() => window.groupFixture.setActive(false))
+  await expect(page.getByTestId('palette-analysis')).toBeDisabled()
   await page.mouse.up()
   expect(await draft(page)).toEqual(before)
   await page.evaluate(() => window.groupFixture.setActive(true))
+  await expect(page.getByTestId('palette-analysis')).toBeEnabled()
   await expect(page.getByTestId('block-b')).toHaveClass(/is-extractable/)
   await page.getByRole('button', { name: '✦ 检查模块', exact: true }).click()
   const panel = page.getByRole('dialog', { name: '模块检查 · 保留好思路' })
@@ -267,9 +270,17 @@ test('hiding the mounted workbench cancels gestures and review without losing th
   await expect(consent).toBeEnabled()
   await consent.check()
   await panel.getByRole('button', { name: '确认并检查模块', exact: true }).click()
+  await expect(panel.getByRole('button', { name: '正在检查…', exact: true })).toBeVisible()
+  const requestId = await page.evaluate(() => window.groupFixture.requests[0].requestId)
   await page.evaluate(() => window.groupFixture.setActive(false))
+  // A fixture setter schedules React work; it does not synchronously hide the
+  // workbench. Release the late reply only after the hide commits and cancels
+  // this exact request, rather than racing a response against an uncommitted hide.
+  await expect(page.getByTestId('palette-analysis')).toBeDisabled()
+  await expect.poll(() => page.evaluate(() => window.groupFixture.canceled)).toEqual([requestId])
   await page.evaluate(() => window.groupFixture.release())
   await page.evaluate(() => window.groupFixture.setActive(true))
+  await expect(page.getByTestId('palette-analysis')).toBeEnabled()
   await expect(panel.getByText('无需修改', { exact: true })).toHaveCount(0)
   await expect(consent).not.toBeChecked()
   expect(await draft(page)).toEqual(before)
