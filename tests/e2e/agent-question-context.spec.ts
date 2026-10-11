@@ -82,12 +82,22 @@ test('history restore clears old study filters and review tab before practice an
   await expect(page.getByRole('status').filter({ hasText: '已保存到本机' })).toBeVisible()
   await page.locator('#answer-text').fill('新的历史草稿')
   await expect(page.getByRole('status').filter({ hasText: '已保存到本机' })).toBeVisible()
-  const restoreId = await page.evaluate(
-    async () =>
-      (await window.examcraft!.getLearningGraph()).snapshots.find(
-        (item) => item.draft.text === '要恢复的史料解释',
-      )!.id,
+  // Typing only saves the draft; a real submission creates the next checkpoint.
+  // The earlier baseline must no longer be the head before its Restore action exists.
+  await page.getByRole('button', { name: '提交并审阅' }).click()
+  await expect(page.getByRole('tab', { name: '审阅反馈', exact: false })).toHaveAttribute(
+    'aria-selected',
+    'true',
   )
+  const restoredScope = await page.evaluate(async () => {
+    const graph = await window.examcraft!.getLearningGraph()
+    const snapshot = graph.snapshots.find((item) => item.draft.text === '要恢复的史料解释')!
+    return {
+      snapshotId: snapshot.id,
+      headId: graph.heads[`${snapshot.subject}:${snapshot.questionId}`],
+    }
+  })
+  expect(restoredScope.snapshotId).not.toBe(restoredScope.headId)
   await page.getByLabel('按学科筛选').getByRole('button', { name: '数学', exact: true }).click()
   const mathTitle = await page.locator('.question-prompt h2').innerText()
   await page.getByRole('textbox', { name: '搜索题目', exact: true }).fill(mathTitle)
@@ -99,7 +109,7 @@ test('history restore clears old study filters and review tab before practice an
   )
   await page.getByRole('button', { name: '练习记录 Review & reflect', exact: true }).click()
   await page
-    .locator(`[data-snapshot-id="${restoreId}"]`)
+    .locator(`[data-snapshot-id="${restoredScope.snapshotId}"]`)
     .getByRole('button', { name: '恢复此快照为新分支' })
     .click()
   await expect(page.getByRole('status').filter({ hasText: '已恢复为新的作答分支' })).toBeVisible()
