@@ -130,6 +130,8 @@ test('normal run sends only chosen scope and displays real result metadata as es
   expect(sent?.allowedTools).toEqual([
     'list_questions',
     'get_question',
+    'search_formulas',
+    'get_formula',
     'math_plot',
     'math_measure',
   ])

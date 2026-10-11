@@ -1,3 +1,4 @@
+import { FORMULA_ENTRIES, FORMULA_CATALOG_VERSION } from '../src/domain/formula-catalog'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -112,6 +113,70 @@ describe('bounded native Agent service', () => {
     expect(result.content).toContain('5')
     expect(state.events.map((e) => e.kind)).toEqual(['model', 'tool', 'model'])
     expect(JSON.stringify(state)).not.toContain('synthetic-agent-key')
+    expect(f.saves).not.toHaveBeenCalled()
+  })
+  it('returns canonical formulas through the native loop and records host citations without writes', async () => {
+    const entry = FORMULA_ENTRIES.find((formula) => formula.subject === 'math')!
+    const payloads: any[] = []
+    const f = await fixture(
+      vi.fn(async (_url, init) => {
+        payloads.push(JSON.parse(String(init?.body)))
+        return payloads.length === 1
+          ? call('formula-1', 'get_formula', { formulaId: entry.id })
+          : final('Model prose with a fabricated citation math.fake.citation')
+      }) as typeof fetch,
+    )
+    await f.agent.start({ ...f.request, allowedTools: ['get_formula'] })
+    const state = await finished(f.agent, f.request.runId)
+    expect(state.status).toBe('complete')
+    expect(state.toolCalls).toBe(1)
+    expect(state.modelRequests).toBe(2)
+    const result = JSON.parse(
+      payloads[1].messages.find((message: any) => message.role === 'tool').content,
+    )
+    expect(result.formula).toEqual(entry)
+    expect(result.catalogVersion).toBe(FORMULA_CATALOG_VERSION)
+    expect(state.formulaReferences?.map((item) => item.formulaId)).toEqual([entry.id])
+    expect(JSON.stringify(state.formulaReferences)).not.toContain('math.fake.citation')
+    expect(state.proposals).toEqual([])
+    expect(f.saves).not.toHaveBeenCalled()
+    expect(JSON.stringify(payloads[0].messages)).toContain('确切公式 ID')
+  })
+  it('charges formula calls to the existing six-tool budget without bypassing model rounds', async () => {
+    let requests = 0
+    const f = await fixture(
+      vi.fn(async () => {
+        requests++
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: 'tool_calls',
+                message: {
+                  role: 'assistant',
+                  content: null,
+                  tool_calls: Array.from({ length: 4 }, (_, i) => ({
+                    id: `formula-${requests}-${i}`,
+                    type: 'function',
+                    function: {
+                      name: 'search_formulas',
+                      arguments: JSON.stringify({ query: '数学' }),
+                    },
+                  })),
+                },
+              },
+            ],
+          }),
+        )
+      }) as typeof fetch,
+    )
+    await f.agent.start({ ...f.request, allowedTools: ['search_formulas'] })
+    const state = await finished(f.agent, f.request.runId)
+    expect(state.status).toBe('failed')
+    expect(state.toolCalls).toBe(4)
+    expect(state.modelRequests).toBe(2)
+    expect(state.message).toContain('预算')
+    expect(requests).toBe(2)
     expect(f.saves).not.toHaveBeenCalled()
   })
   it('never dispatches without explicit parent consent or required delegate consent', async () => {

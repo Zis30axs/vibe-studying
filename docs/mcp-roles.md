@@ -49,3 +49,26 @@ full-mode external MCP server still contain references. A host must select its
 allowed tools and contexts correctly. Student-facing prompt/source/choice text
 also remains authored question-bank content, not a guarantee that the author has
 never embedded an answer in a public field.
+
+## Bundled formula references
+
+`search_formulas` and `get_formula` expose the same original, curated offline
+math/geography entries as the desktop formula reader. Each full entry includes a
+stable ID, expression, symbol definitions, units, conditions, pitfalls, worked
+example and reference URLs. The output includes the catalog version and
+`bundled-formula-reference` provenance. The server does not fetch those URLs.
+
+These general references are available in student mode without granting answer-key
+access. Startup `--subject math` or `--subject geography` limits formula results to
+that subject; any other subject disables the two tools. An unscoped server can
+search both. Question-ID and tag filters continue to govern questions, not the
+general formula library. Search accepts a nonempty query up to 120 characters,
+optional exact chapter and limit 1–3; get accepts one exact formula ID and fails
+for missing or cross-subject IDs. Neither tool edits answers or saves questions.
+
+The desktop Agent also requires these tools to be explicitly enabled in the
+existing consented run. Formula calls count against its existing six-tool budget
+and cannot expand subject, model or textbook authority. Host-built receipts show
+only canonical formulas actually returned by a successful tool call. A receipt is
+retrieval evidence, not verification of the model's reasoning or a live source
+check. Ordinary formula reading and favorites do not create AI-help provenance.

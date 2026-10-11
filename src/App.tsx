@@ -32,6 +32,7 @@ import { WebResearchSettings } from './components/WebResearchSettings'
 import { SelectionAdvisor } from './components/SelectionAdvisor'
 import { GitHubProfile } from './components/GitHubProfile'
 import { KnowledgeLibrary } from './components/KnowledgeLibrary'
+import { FormulaReference } from './components/FormulaReference'
 import {
   ReviewKnowledgePanel,
   supportsReviewKnowledge,
@@ -45,12 +46,14 @@ import { GeographyGenerator } from './components/GeographyGenerator'
 import { GeographyFigure } from './components/GeographyFigure'
 import { TerrainFigure, TerrainReviewProfile } from './components/TerrainFigure'
 
-type View = 'practice' | 'math' | 'politics' | 'geography' | 'agent' | 'history' | 'adapters'
+type View =
+  'practice' | 'math' | 'politics' | 'geography' | 'formulas' | 'agent' | 'history' | 'adapters'
 const navigation: { id: View; icon: string; label: string; caption: string }[] = [
   { id: 'practice', icon: '▤', label: '题目练习', caption: 'Practice' },
   { id: 'math', icon: 'ƒ', label: '数学工作台', caption: 'Math lab' },
   { id: 'politics', icon: '▦', label: '文科组装', caption: 'Argument builder' },
   { id: 'geography', icon: '◎', label: '地理工作台', caption: 'Geo canvas' },
+  { id: 'formulas', icon: '∑', label: '公式速查', caption: 'Formula reference' },
   { id: 'agent', icon: '✧', label: 'Agent 工作台', caption: 'Bounded tools' },
   { id: 'history', icon: '◷', label: '练习记录', caption: 'Review & reflect' },
   { id: 'adapters', icon: '⌘', label: '题库与 Agent', caption: 'Connections' },
@@ -233,6 +236,8 @@ export default function App() {
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState('')
   const [view, setView] = useState<View>('practice')
+  const [formulaOrigin, setFormulaOrigin] = useState<View>('practice')
+  const workspaceView = view === 'formulas' ? formulaOrigin : view
   const currentViewRef = useRef<View>(view)
   currentViewRef.current = view
   const [subject, setSubject] = useState('all')
@@ -308,10 +313,13 @@ export default function App() {
   }, [])
 
   const filtered = questions.filter((q) => {
-    if (view === 'math' && q.subject !== 'math') return false
-    if (view === 'politics' && !['politics', 'history', 'chinese', 'geography'].includes(q.kind))
+    if (workspaceView === 'math' && q.subject !== 'math') return false
+    if (
+      workspaceView === 'politics' &&
+      !['politics', 'history', 'chinese', 'geography'].includes(q.kind)
+    )
       return false
-    if (view === 'geography' && q.kind !== 'geography') return false
+    if (workspaceView === 'geography' && q.kind !== 'geography') return false
     if (subject !== 'all' && q.subject !== subject) return false
     return `${q.title} ${q.tags.join(' ')} ${q.source}`.toLowerCase().includes(query.toLowerCase())
   })
@@ -323,7 +331,7 @@ export default function App() {
   useEffect(() => {
     setKnowledgeExcerpts([])
     setKnowledgeCitation(undefined)
-  }, [selected?.id, view])
+  }, [selected?.id, workspaceView])
   const cloudReady = Boolean(modelConfig?.configured)
   const draft = selected ? (state.drafts[selected.id] ?? emptyDraft(selected.kind)) : emptyDraft()
   const currentDraftRef = useRef(draft)
@@ -341,12 +349,16 @@ export default function App() {
   function changeView(next: View) {
     if (busy || next === view) return
     const navigate = () => {
+      if (next === 'formulas') setFormulaOrigin(view)
       setView(next)
       layout.closeDrawers()
-      setKnowledgeExcerpts([])
-      setSubject('all')
-      setQuery('')
-      setTab('answer')
+      // Preserve practice state only for a formula lookup and return to its origin.
+      if (next !== 'formulas' && !(view === 'formulas' && next === formulaOrigin)) {
+        setKnowledgeExcerpts([])
+        setSubject('all')
+        setQuery('')
+        setTab('answer')
+      }
       setMessage('')
     }
     if (view === 'adapters' && settingsNavigationGuard.current)
@@ -585,13 +597,15 @@ export default function App() {
               <div className="page-heading">
                 <div>
                   <div className="eyebrow">
-                    {view === 'agent'
-                      ? 'BOUNDED AGENT, EXPLICIT TOOLS'
-                      : view === 'history'
-                        ? 'REFLECT & GROW'
-                        : view === 'adapters'
-                          ? 'YOUR KNOWLEDGE, CONNECTED'
-                          : 'A LITTLE PROGRESS, EVERY DAY'}
+                    {view === 'formulas'
+                      ? 'LOOK UP, UNDERSTAND, APPLY'
+                      : view === 'agent'
+                        ? 'BOUNDED AGENT, EXPLICIT TOOLS'
+                        : view === 'history'
+                          ? 'REFLECT & GROW'
+                          : view === 'adapters'
+                            ? 'YOUR KNOWLEDGE, CONNECTED'
+                            : 'A LITTLE PROGRESS, EVERY DAY'}
                   </div>
                   <h1>
                     {view === 'practice'
@@ -602,20 +616,24 @@ export default function App() {
                           ? '让每个观点，有理有据。'
                           : view === 'geography'
                             ? '在坐标里，发现联系。'
-                            : view === 'agent'
-                              ? '把工具交给 Agent，把决定留给自己。'
-                              : view === 'history'
-                                ? '每一次练习，都有迹可循。'
-                                : '为你的学习，接入更多可能。'}
+                            : view === 'formulas'
+                              ? '把每个公式，用在合适的地方。'
+                              : view === 'agent'
+                                ? '把工具交给 Agent，把决定留给自己。'
+                                : view === 'history'
+                                  ? '每一次练习，都有迹可循。'
+                                  : '为你的学习，接入更多可能。'}
                   </h1>
                   <p>
-                    {view === 'agent'
-                      ? '确认学习范围与能力，查看实际工具执行，并逐项审阅写入建议。'
-                      : view === 'history'
-                        ? '回看提交时的答案与反馈，找到下一次进步的起点。'
-                        : view === 'adapters'
-                          ? '从本地题库出发，逐步接入你自己的工具与 Agent。'
-                          : '选题 → 作答 → 审阅 → 重做：根据反馈改进答案，保留每次练习记录。'}
+                    {view === 'formulas'
+                      ? '查公式、看条件、核对易错点，再带着理解回到练习。'
+                      : view === 'agent'
+                        ? '确认学习范围与能力，查看实际工具执行，并逐项审阅写入建议。'
+                        : view === 'history'
+                          ? '回看提交时的答案与反馈，找到下一次进步的起点。'
+                          : view === 'adapters'
+                            ? '从本地题库出发，逐步接入你自己的工具与 Agent。'
+                            : '选题 → 作答 → 审阅 → 重做：根据反馈改进答案，保留每次练习记录。'}
                   </p>
                 </div>
                 <div className="session-tag">
@@ -670,6 +688,10 @@ export default function App() {
                 </section>
               )}
 
+              <div hidden={view !== 'formulas'}>
+                <FormulaReference />
+              </div>
+
               {view === 'agent' && (
                 <AgentWorkbench
                   api={api!}
@@ -719,11 +741,8 @@ export default function App() {
                 />
               )}
 
-              {(view === 'practice' ||
-                view === 'math' ||
-                view === 'politics' ||
-                view === 'geography') && (
-                <section className="workspace-region" aria-label="学习工作台">
+              {['practice', 'math', 'politics', 'geography'].includes(workspaceView) && (
+                <section className="workspace-region" aria-label="学习工作台" hidden={!isStudyView}>
                   <div
                     className="workspace-toolbar"
                     aria-label="工作区布局"
@@ -804,10 +823,10 @@ export default function App() {
                           ...subjects
                             .filter(
                               (id) =>
-                                view === 'practice' ||
-                                (view === 'politics'
+                                workspaceView === 'practice' ||
+                                (workspaceView === 'politics'
                                   ? ['politics', 'history', 'chinese', 'geography'].includes(id)
-                                  : id === view),
+                                  : id === workspaceView),
                             )
                             .map((id) => [id, id === 'politics' ? '政治' : subjectLabel[id]]),
                         ].map(([id, label]) => (
@@ -1217,8 +1236,8 @@ export default function App() {
                         {selected && (
                           <div hidden={tab !== 'answer'}>
                             <SelectionAdvisor
-                              key={`${selected.id}-${view}`}
-                              active={layout.toolsVisible && tab === 'answer'}
+                              key={`${selected.id}-${workspaceView}`}
+                              active={isStudyView && layout.toolsVisible && tab === 'answer'}
                               api={api!}
                               config={childModelConfig}
                               question={selected}
@@ -1244,16 +1263,21 @@ export default function App() {
                               selected.kind,
                             ) && (
                               <WorkbenchDock
-                                key={`dock-argument-${selected.id}-${view}`}
+                                key={`dock-argument-${selected.id}-${workspaceView}`}
                                 title="文科模块工作台"
                                 selfSizing
-                                initiallyOpen={view === 'politics'}
+                                initiallyOpen={workspaceView === 'politics'}
                               >
                                 {(dockOpen) => (
                                   <div data-advisor-source="argument">
                                     <HumanitiesComposer
                                       key={`argument-${selected.id}`}
-                                      active={layout.toolsVisible && dockOpen && tab === 'answer'}
+                                      active={
+                                        isStudyView &&
+                                        layout.toolsVisible &&
+                                        dockOpen &&
+                                        tab === 'answer'
+                                      }
                                       subject={selected.subject}
                                       question={selected}
                                       config={childModelConfig}
@@ -1268,10 +1292,10 @@ export default function App() {
                             )}
                             {selected.kind === 'geography' && (
                               <WorkbenchDock
-                                key={`dock-geography-${selected.id}-${view}`}
+                                key={`dock-geography-${selected.id}-${workspaceView}`}
                                 title="地理交互工作台"
                                 selfSizing
-                                initiallyOpen={view === 'geography'}
+                                initiallyOpen={workspaceView === 'geography'}
                               >
                                 {(dockOpen) => (
                                   <GeographyWorkbench
@@ -1279,7 +1303,11 @@ export default function App() {
                                     drawing={draft.drawing}
                                     onChange={(drawing) => updateDraft({ ...draft, drawing })}
                                     disabled={
-                                      busy || !layout.toolsVisible || !dockOpen || tab !== 'answer'
+                                      busy ||
+                                      !isStudyView ||
+                                      !layout.toolsVisible ||
+                                      !dockOpen ||
+                                      tab !== 'answer'
                                     }
                                   />
                                 )}
@@ -1287,10 +1315,10 @@ export default function App() {
                             )}
                             {selected.subject === 'math' && (
                               <WorkbenchDock
-                                key={`dock-math-${selected.id}-${view}`}
+                                key={`dock-math-${selected.id}-${workspaceView}`}
                                 title="数学交互工作台"
                                 selfSizing
-                                initiallyOpen={view === 'math'}
+                                initiallyOpen={workspaceView === 'math'}
                               >
                                 {(dockOpen) => (
                                   <MathWorkbench
@@ -1298,7 +1326,11 @@ export default function App() {
                                     value={draft.math ?? emptyMathState()}
                                     onChange={(math) => updateDraft({ ...draft, math })}
                                     disabled={
-                                      busy || !layout.toolsVisible || !dockOpen || tab !== 'answer'
+                                      busy ||
+                                      !isStudyView ||
+                                      !layout.toolsVisible ||
+                                      !dockOpen ||
+                                      tab !== 'answer'
                                     }
                                   />
                                 )}
@@ -1311,8 +1343,8 @@ export default function App() {
                         )}
                         {
                           <KnowledgeLibrary
-                            key={`knowledge-${selected?.id ?? 'none'}-${view}`}
-                            active={layout.toolsVisible}
+                            key={`knowledge-${selected?.id ?? 'none'}-${workspaceView}`}
+                            active={isStudyView && layout.toolsVisible}
                             initialSubject={selected?.subject ?? 'politics'}
                             api={api!}
                             selectedEvidence={knowledgeExcerpts}
@@ -1321,13 +1353,13 @@ export default function App() {
                           />
                         }
 
-                        {view === 'geography' && (
+                        {workspaceView === 'geography' && (
                           <GeographyGenerator
                             localContext={selected ? { questionId: selected.id, draft } : undefined}
                             api={api!}
                             config={modelConfig}
                             disabled={busy}
-                            visible={layout.toolsVisible}
+                            visible={isStudyView && layout.toolsVisible}
                             onAccepted={(question) => {
                               setQuestions((previous) => [
                                 ...previous.filter((item) => item.id !== question.id),

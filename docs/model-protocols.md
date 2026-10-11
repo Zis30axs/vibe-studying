@@ -92,3 +92,15 @@ Official native format references: [OpenAI function calling](https://developers.
 ## 公开网络工具
 
 Agent 的 `web_search` / `web_fetch` 可供主模型和实际委派的子模型调用；子模型只暴露这两个已启用工具，不可递归委派或使用额外题目/文件工具。子模型最多一次结果续接，计入同一任务两次委派模型请求、六次工具调用和总超时。网络检索/抓取额度也是同一个会话对象，不能通过切换角色重置。固定公开检索范围、来源编号和明确网址不取自答卷/教材/任务自由文本；供应商与模型接收方分别按新增数据类别授权。参见 [公开网络工具](web-research.md)。
+
+## Bundled formula tools
+
+The native allowlist now includes `search_formulas` and `get_formula` for the
+current mathematics/geography subject. The maximum definition bundle is exactly
+18, increased only to accommodate these two read-only tools; the three model-turn,
+six total tool-call and two delegation budgets are unchanged. All four protocol
+serializers retain their existing bounded argument/result/continuation checks.
+Formula results contain only built-in teaching material and exact catalog IDs,
+not imported textbook excerpts, current answers, favorites or search history.
+The UI's formula receipts are populated from successful local registry results,
+not from arbitrary citations in model output.

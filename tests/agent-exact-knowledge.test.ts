@@ -78,7 +78,7 @@ describe('exact Agent knowledge retrieval', () => {
       context(),
       adapters({ resolveKnowledge: mockLibrary().resolveChunks }),
     )
-    expect(AGENT_TOOL_NAMES).toHaveLength(16)
+    expect(AGENT_TOOL_NAMES).toHaveLength(18)
     expect(AGENT_TOOL_NAMES.length).toBeLessThanOrEqual(TOOL_TRANSPORT_LIMITS.definitions)
     const definition = registry.definitions.find((entry) => entry.name === 'resolve_knowledge')!
     expect(definition.inputSchema).toMatchObject({

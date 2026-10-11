@@ -1,3 +1,4 @@
+import type { FormulaReferenceReceipt } from '../shared/formula-tools'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { AgentRunRequest, AgentRunState, AgentWorkbenchApi } from '../shared/agent-workbench'
 import { AGENT_BUDGET } from '../shared/agent-workbench'
@@ -52,6 +53,49 @@ const runLabels: Record<AgentRunState['status'], string> = {
 }
 const eventLabels = { running: '进行中', complete: '完成', failed: '失败', cancelled: '已取消' }
 const seconds = (value: number) => `${Math.max(0, Math.floor(value / 1000))} 秒`
+
+/** These receipts are supplied by the host registry, not parsed from model prose. */
+export function AgentFormulaReferences({ references }: { references: FormulaReferenceReceipt[] }) {
+  return (
+    <section
+      className="agent-web-sources agent-formula-references"
+      aria-label="本次内置公式查阅凭据"
+    >
+      <h4>本次查阅的内置公式</h4>
+      <p className="agent-muted">
+        以下条目由本地公式工具实际返回。查阅记录不代表模型正确运用了公式；请对照适用条件。原始来源本次未联网读取。
+      </p>
+      <ol>
+        {references.map((reference) => (
+          <li key={reference.formulaId}>
+            <strong>{reference.title}</strong>
+            <small>
+              {reference.formulaId} · 公式库 {reference.catalogVersion} · 条目 v
+              {reference.entryVersion}
+            </small>
+            <p className="agent-plain-text">{reference.expression}</p>
+            <ul>
+              {reference.conditions.map((condition) => (
+                <li key={condition}>{condition}</li>
+              ))}
+            </ul>
+            {reference.sources.map((source) => (
+              <label className="agent-source-url" key={source.url}>
+                {source.title}（来源网址，可复制）
+                <textarea
+                  readOnly
+                  value={source.url}
+                  rows={2}
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+              </label>
+            ))}
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
+}
 
 export function AgentWebSources({ sources }: { sources: WebResearchSource[] }) {
   return (
@@ -934,6 +978,9 @@ export function AgentWorkbench({
                     模型建议仅供学习，数值采样不构成证明，教学模拟不代表真实测绘。
                   </p>
                 </div>
+              )}
+              {!!snapshot.run.formulaReferences?.length && (
+                <AgentFormulaReferences references={snapshot.run.formulaReferences} />
               )}
               {!!snapshot.run.web?.sources.length && (
                 <AgentWebSources sources={snapshot.run.web.sources} />

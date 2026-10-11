@@ -1,3 +1,10 @@
+import { FORMULA_CATALOG_VERSION } from '../src/domain/formula-catalog'
+import { getFormula, searchFormulas } from '../src/domain/formula-reference'
+import {
+  formulaSearchInputSchema,
+  formulaGetInputSchema,
+  FORMULA_PROVENANCE,
+} from '../src/shared/formula-tools'
 import { executeTerrainTool, terrainToolInputSchema } from '../src/domain/terrain'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { version as appVersion } from '../package.json'
@@ -93,6 +100,57 @@ export function createExamCraftMcpServer(
         return { review: await agent.review(question, validateAnswer(question, draft, true)) }
       }),
   )
+  // General teaching formulas are public bundled references, available without
+  // answer-key access. A startup subject can only narrow the catalog.
+  if (
+    !allowedScope.subject ||
+    allowedScope.subject === 'math' ||
+    allowedScope.subject === 'geography'
+  ) {
+    const formulaSubject = allowedScope.subject as 'math' | 'geography' | undefined
+    server.registerTool(
+      'search_formulas',
+      {
+        title: '检索内置公式速查',
+        description:
+          '只读离线公式库，每次最多三条，含适用条件、符号、例题及来源。不能改变启动学科范围；不读取题目答案或教材，不访问来源网页。引用须保留确切 ID 与公式库版本。',
+        inputSchema: formulaSearchInputSchema,
+        annotations,
+      },
+      async (input) =>
+        run(async () => ({
+          catalogVersion: FORMULA_CATALOG_VERSION,
+          provenance: FORMULA_PROVENANCE,
+          formulas: searchFormulas(input.query, {
+            subject: formulaSubject,
+            chapter: input.chapter,
+            limit: input.limit ?? 3,
+          }),
+        })),
+    )
+    server.registerTool(
+      'get_formula',
+      {
+        title: '按编号读取内置公式',
+        description:
+          '读取内置公式的完整适用条件、例题及来源，未知或跨启动学科编号失败；不计算当前题目，不改写答卷。',
+        inputSchema: formulaGetInputSchema,
+        annotations,
+      },
+      async ({ formulaId }) =>
+        run(async () => {
+          const formula = getFormula(formulaId)
+          if (!formula) throw new Error('内置公式编号不存在；请先检索并使用返回的确切编号。')
+          if (formulaSubject && formula.subject !== formulaSubject)
+            throw new Error('公式不在启动时允许的学科范围内。')
+          return {
+            catalogVersion: FORMULA_CATALOG_VERSION,
+            provenance: FORMULA_PROVENANCE,
+            formula,
+          }
+        }),
+    )
+  }
   // A teaching calculator can disclose computed answers. Expose it only to the
   // startup-authorized teaching role, never through a student request parameter.
   if (

@@ -41,6 +41,8 @@ const toolLabels: Record<string, string> = {
   search_knowledge: '搜索教材',
   read_knowledge: '阅读教材',
   math_plot: '计算函数图像',
+  search_formulas: '公式检索',
+  get_formula: '公式读取',
   math_measure: '数学测量',
   geography_measure: '地理测量',
   terrain_calculate: '地形计算',

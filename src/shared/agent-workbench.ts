@@ -1,3 +1,4 @@
+import type { FormulaReferenceReceipt } from './formula-tools'
 import type { WebResearchRunRequest, WebResearchBudget, WebResearchSource } from './web-research'
 import type { AnswerDraft, StudentQuestion, Subject } from './types'
 import type { AgentToolName, AgentToolProposal } from './agent-tool-context'
@@ -53,6 +54,8 @@ export interface AgentRunState {
   text: string
   message: string
   proposals: AgentProposalPreview[]
+  /** Host-built receipts for bundled formulas actually returned by tools, never model citations. */
+  formulaReferences?: FormulaReferenceReceipt[]
   web?: { budget: WebResearchBudget; sources: WebResearchSource[] }
 }
 export interface AgentWorkbenchApi {

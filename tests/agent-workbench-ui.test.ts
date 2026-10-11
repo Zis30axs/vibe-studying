@@ -155,12 +155,16 @@ describe('Agent renderer capability and consent scope', () => {
     expect(availableAgentTools(scope())).toEqual([
       'list_questions',
       'get_question',
+      'search_formulas',
+      'get_formula',
       'math_plot',
       'math_measure',
     ])
     expect(availableAgentTools(scope({ subject: 'geography' }))).toEqual([
       'list_questions',
       'get_question',
+      'search_formulas',
+      'get_formula',
       'geography_measure',
       'terrain_calculate',
     ])

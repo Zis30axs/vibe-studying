@@ -152,6 +152,27 @@ function addUnsupported(protocol: ModelProtocol, envelope: any) {
 }
 
 describe.each(protocols)('%s native tools (synthetic fetch only)', (protocol) => {
+  it('accepts eighteen bounded definitions including formula tools and rejects a nineteenth before sending', async () => {
+    const tools = Array.from({ length: 18 }, (_, index) => ({
+      ...definitions[0],
+      name:
+        index === 16 ? 'search_formulas' : index === 17 ? 'get_formula' : `read_fixture_${index}`,
+    }))
+    expect(TOOL_TRANSPORT_LIMITS.definitions).toBe(18)
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(finalEnvelope(protocol)))
+    await expect(
+      new ModelToolTransport(config(protocol), key, fetcher).start('System', {}, tools),
+    ).resolves.toMatchObject({ kind: 'final' })
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    const denied = vi.fn<typeof fetch>()
+    await expect(
+      new ModelToolTransport(config(protocol), key, denied).start('System', {}, [
+        ...tools,
+        { ...definitions[0], name: 'nineteenth' },
+      ]),
+    ).rejects.toBeInstanceOf(ModelTransportError)
+    expect(denied).not.toHaveBeenCalled()
+  })
   it('performs actual calls, sends ordered results, and returns final model text', async () => {
     const fetcher = vi
       .fn<typeof fetch>()

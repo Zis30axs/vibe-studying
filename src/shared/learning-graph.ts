@@ -54,6 +54,8 @@ export const traceTools = [
   'propose_question',
   'list_questions',
   'get_question',
+  'search_formulas',
+  'get_formula',
   'get_draft',
   'get_attempts',
   'search_knowledge',

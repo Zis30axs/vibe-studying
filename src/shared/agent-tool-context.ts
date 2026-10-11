@@ -13,6 +13,8 @@ import type {
 export const AGENT_TOOL_NAMES = [
   'list_questions',
   'get_question',
+  'search_formulas',
+  'get_formula',
   'search_knowledge',
   'resolve_knowledge',
   'web_search',

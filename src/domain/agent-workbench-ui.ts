@@ -19,6 +19,14 @@ export const AGENT_TOOL_LABELS: Record<AgentToolName, { label: string; descripti
   },
   list_questions: { label: '查看题目列表', description: '仅本次确认的当前题目摘要。' },
   get_question: { label: '读取当前题目', description: '题干、选项和图形，不含参考答案。' },
+  search_formulas: {
+    label: '检索内置公式',
+    description: '本学科公式、条件与例题；每次最多三条，不联网或读取教材。',
+  },
+  get_formula: {
+    label: '按编号读取公式',
+    description: '精确读取内置公式及来源，结果回传主模型并保留本地查阅凭据。',
+  },
   search_knowledge: {
     label: '检索选定教材',
     description: '仅选定物理 PDF 页码，最多三段摘录；结果回传主模型。',
@@ -73,6 +81,8 @@ export const AGENT_CHILD_TOOLS: readonly AgentToolName[] = ['advise_selection', 
 export const AGENT_DEFAULT_TOOLS: AgentToolName[] = [
   'list_questions',
   'get_question',
+  'search_formulas',
+  'get_formula',
   'search_knowledge',
   'resolve_knowledge',
   'math_plot',
@@ -96,6 +106,8 @@ export function availableAgentTools(scope: AgentToolUiScope): AgentToolName[] {
     if (name === 'web_search' || name === 'web_fetch') return scope.hasWeb === true
     if (AGENT_DELEGATE_TOOLS.includes(name) && !scope.allowDelegation) return false
     if (['list_questions', 'get_question'].includes(name)) return scope.hasQuestion
+    if (name === 'search_formulas' || name === 'get_formula')
+      return scope.subject === 'math' || scope.subject === 'geography'
     if (name === 'search_knowledge' || name === 'resolve_knowledge') return scope.hasKnowledge
     if (['math_plot', 'math_measure'].includes(name)) return scope.subject === 'math'
     if (['geography_measure', 'terrain_calculate'].includes(name))

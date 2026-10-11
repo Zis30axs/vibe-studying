@@ -1,3 +1,4 @@
+import { FORMULA_ENTRIES, FORMULA_CATALOG_VERSION } from '../src/domain/formula-catalog'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -56,9 +57,11 @@ describe('real MCP stdio client/server', () => {
 
   it('negotiates tools and reads only the server allowed scope', async () => {
     expect((await client.listTools()).tools.map((tool) => tool.name).sort()).toEqual([
+      'get_formula',
       'get_question',
       'list_questions',
       'review_answer',
+      'search_formulas',
       'terrain_calculate',
     ])
     const questions = await bank.list()
@@ -66,6 +69,40 @@ describe('real MCP stdio client/server', () => {
     expect((await bank.get('geo-choice-1')).title).toBe('经纬网中的方向')
     expect((await bank.get('geo-choice-1')).correctAnswer).toBe('C')
     expect((await bank.get('geo-choice-1')).explanation).toBeTruthy()
+  })
+  it('exposes the same bounded formula catalog over MCP and cannot widen subject scope', async () => {
+    const entry = FORMULA_ENTRIES.find((formula) => formula.subject === 'geography')!
+    const found = await client.callTool({
+      name: 'search_formulas',
+      arguments: { query: entry.title },
+    })
+    expect(found.isError).not.toBe(true)
+    const output = structured(found)
+    expect(output.catalogVersion).toBe(FORMULA_CATALOG_VERSION)
+    expect((output.formulas as any[]).some((formula) => formula.id === entry.id)).toBe(true)
+    const got = await client.callTool({ name: 'get_formula', arguments: { formulaId: entry.id } })
+    expect(structured(got).formula).toEqual(entry)
+    const outside = FORMULA_ENTRIES.find((formula) => formula.subject === 'math')!
+    expect(
+      (await client.callTool({ name: 'get_formula', arguments: { formulaId: outside.id } }))
+        .isError,
+    ).toBe(true)
+    expect(
+      (
+        await client.callTool({
+          name: 'get_formula',
+          arguments: { formulaId: 'geo.missing.formula' },
+        })
+      ).isError,
+    ).toBe(true)
+    expect(
+      (
+        await client.callTool({
+          name: 'search_formulas',
+          arguments: { query: entry.title, limit: 4 },
+        })
+      ).isError,
+    ).toBe(true)
   })
   it('executes the bounded terrain calculator through a real MCP client', async () => {
     const response = await client.callTool({
@@ -147,6 +184,16 @@ describe('new subjects over real MCP stdio', () => {
         }),
       )
       expect((await client.listTools()).tools.map((t) => t.name)).not.toContain('terrain_calculate')
+      expect((await client.listTools()).tools.map((t) => t.name)).toContain('search_formulas')
+      const generalFormula = FORMULA_ENTRIES.find((entry) => entry.subject === 'geography')!
+      expect(
+        (
+          await client.callTool({
+            name: 'get_formula',
+            arguments: { formulaId: generalFormula.id },
+          })
+        ).isError,
+      ).not.toBe(true)
       const forbiddenTerrain = await client.callTool({
         name: 'terrain_calculate',
         arguments: { terrain: DEFAULT_TERRAIN, referenceAccess: 'full' },

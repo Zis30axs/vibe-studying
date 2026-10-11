@@ -1,0 +1,6 @@
+# Keep released source and documented data hashes identical across platforms.
+* text=auto eol=lf
+*.pdf -text
+*.jpg -text
+*.png -text
+*.zip -text

@@ -106,6 +106,40 @@ try {
     .getByRole('button', { name: /数学工作台/ })
     .click()
   await expect(page.getByRole('region', { name: '数学交互工作台', exact: true })).toBeVisible()
+  // Verify the offline catalog shipped in the ZIP, without configuring a model or sending API calls.
+  const formula = {
+    id: 'math.vector.dot',
+    title: '空间向量数量积',
+    expression: 'a·b = a₁b₁ + a₂b₂ + a₃b₃；a·b = |a||b| cos θ',
+    conditions: [
+      '坐标公式允许零向量；含夹角的公式要求两向量均非零。',
+      '对于两个非零向量，a·b = 0 当且仅当它们垂直。',
+    ],
+  }
+  await page
+    .getByRole('navigation', { name: '工作区导航' })
+    .getByRole('button', { name: '公式速查 Formula reference', exact: true })
+    .click()
+  let formulaReader = page.getByRole('region', { name: '公式速查', exact: true })
+  await expect(formulaReader).toBeVisible()
+  await formulaReader.getByRole('searchbox', { name: '搜索公式' }).fill(formula.id)
+  await expect(
+    formulaReader.getByRole('heading', { name: formula.title, exact: true }),
+  ).toBeVisible()
+  await expect(formulaReader.getByLabel('公式表达式')).toHaveText(formula.expression)
+  await expect(
+    formulaReader.getByRole('region', { name: '适用条件', exact: true }).getByRole('listitem'),
+  ).toHaveText(formula.conditions)
+  await formulaReader.getByRole('button', { name: `收藏：${formula.title}`, exact: true }).click()
+  await expect(
+    formulaReader.getByRole('button', { name: `取消收藏：${formula.title}`, exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true')
+  await expect(formulaReader.getByRole('status').filter({ hasText: '已保存到本机' })).toBeVisible()
+  await page
+    .getByRole('navigation', { name: '工作区导航' })
+    .getByRole('button', { name: '数学工作台 Math lab', exact: true })
+    .click()
+  await expect(page.getByRole('region', { name: '数学交互工作台', exact: true })).toBeVisible()
   // Generate only original test documents. Real/private textbooks never enter CI or release assets.
   const fixtureModule = join(temporary, 'synthetic-pdf.mjs')
   await build({
@@ -203,10 +237,30 @@ try {
   page = await launch()
   assert.equal((await page.evaluate(() => window.examcraft.loadState())).attempts.length, 1)
   assert.equal((await page.evaluate(() => window.examcraft.listKnowledgeDocuments())).length, 6)
+  await page
+    .getByRole('navigation', { name: '工作区导航' })
+    .getByRole('button', { name: '公式速查 Formula reference', exact: true })
+    .click()
+  formulaReader = page.getByRole('region', { name: '公式速查', exact: true })
+  await formulaReader.getByRole('button', { name: /只看收藏/ }).click()
+  await expect(formulaReader.getByRole('button', { name: /只看收藏/ })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+  await expect(
+    formulaReader.getByRole('navigation', { name: '公式列表' }).getByRole('button'),
+  ).toHaveCount(1)
+  await expect(
+    formulaReader.getByRole('heading', { name: formula.title, exact: true }),
+  ).toBeVisible()
+  await expect(formulaReader.getByLabel('公式表达式')).toHaveText(formula.expression)
+  await expect(
+    formulaReader.getByRole('button', { name: `取消收藏：${formula.title}`, exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByRole('alert')).toHaveCount(0)
   assert.deepEqual(errors, [])
   console.log(
-    `Packaged smoke passed: ${artifact}.zip; packaged mode, production protocol, feature panels, submit/history, six-subject PDF package import/search/canvas, dedupe and restart.`,
+    `Packaged smoke passed: ${artifact}.zip; packaged mode, production protocol, feature panels, submit/history, offline formula search/conditions/favorites, six-subject PDF package import/search/canvas, dedupe and restart persistence.`,
   )
 } finally {
   await app?.close()

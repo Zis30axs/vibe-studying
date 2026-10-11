@@ -1,3 +1,12 @@
+import { FORMULA_CATALOG_VERSION } from '../domain/formula-catalog'
+import { getFormula, searchFormulas } from '../domain/formula-reference'
+import type { FormulaEntry } from '../shared/formula-reference'
+import {
+  formulaSearchInputSchema,
+  formulaGetInputSchema,
+  FORMULA_PROVENANCE,
+  type FormulaReferenceReceipt,
+} from '../shared/formula-tools'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import {
@@ -58,6 +67,7 @@ export const AGENT_TOOL_LIMITS = Object.freeze({
   depth: 24,
 })
 type ErrorCode =
+  | 'not_found'
   | 'unknown_tool'
   | 'forbidden'
   | 'invalid_arguments'
@@ -68,6 +78,7 @@ type ErrorCode =
   | 'tool_failed'
   | 'knowledge_limit'
 const errorMessages: Record<ErrorCode, string> = {
+  not_found: '内置公式编号不存在；请先检索并使用返回的确切编号。',
   unknown_tool: '工具不在允许清单中。',
   knowledge_limit:
     '本次任务累计最多发送三段不同教材摘录，每段不超过1200字符；新摘录额度已用尽，可重复使用已返回摘录。',
@@ -198,6 +209,8 @@ const questionProposalSchema = z.strictObject({
   researchOrigin: z.enum(['adapted', 'unverified-source']).optional(),
 })
 const schemas = {
+  search_formulas: formulaSearchInputSchema,
+  get_formula: formulaGetInputSchema,
   list_questions: z.strictObject({
     offset: z.number().int().min(0).max(1000).optional(),
     limit: z.number().int().min(1).max(10).optional(),
@@ -252,6 +265,10 @@ const schemas = {
   propose_question: questionProposalSchema,
 } satisfies Record<AgentToolName, z.ZodType>
 const descriptions: Record<AgentToolName, string> = {
+  search_formulas:
+    '搜索当前学科的内置公式速查，每次最多三条完整条目，含确切ID、符号单位、适用条件、易错点、例题和参考来源。只读离线原创教学整理，不读取教材或答案，不访问来源网址。引用时保留formulaId、catalogVersion并核对适用条件；没有命中就说明未收录。',
+  get_formula:
+    '按检索结果的确切formulaId读取当前学科内置公式；不存在或跨学科编号失败，不猜测编号。保留公式版本与参考来源，明确适用条件；不会计算当前题目或改写作答。',
   list_questions:
     '列出本次已授权学科和题目范围中的学生可见摘要，每次最多十题；不可改变范围，不含参考答案。',
   get_question: '读取本次允许题目的学生版题干、选项、示意图；永不返回解析、正确答案或评分依据。',
@@ -317,6 +334,7 @@ export function createAgentToolRegistry(input: AgentToolContext, adapters: Agent
     ids = new Set(context.questionIds)
   const questionCache = new Map<string, Question>()
   let retrievedEvidence: KnowledgeEvidence[] = []
+  const formulaReferences = new Map<string, FormulaReferenceReceipt>()
   // Local feedback and formal remote grading return to the parent profile only.
   // Advisor/module delegation sends reference-derived data to both recipients.
   const referencesAllowed = () =>
@@ -326,6 +344,8 @@ export function createAgentToolRegistry(input: AgentToolContext, adapters: Agent
   const webAllowed = () => !!context.web?.consent && !!adapters.getWebSources
   const permitted = (name: AgentToolName): boolean => {
     if (!allowed.has(name)) return false
+    if (name === 'search_formulas' || name === 'get_formula')
+      return context.subject === 'math' || context.subject === 'geography'
     if (name === 'search_knowledge') return knowledgeAllowed() && !!adapters.searchKnowledge
     if (name === 'resolve_knowledge')
       return knowledgeAllowed() && (!!adapters.resolveKnowledge || !!adapters.resolveKnowledgeIndex)
@@ -510,6 +530,22 @@ export function createAgentToolRegistry(input: AgentToolContext, adapters: Agent
   }))
   async function run(name: AgentToolName, args: unknown): Promise<unknown> {
     switch (name) {
+      case 'search_formulas': {
+        const { query, chapter, limit = 3 } = schemas.search_formulas.parse(args)
+        const formulas = searchFormulas(query, {
+          subject: context.subject as 'math' | 'geography',
+          chapter,
+          limit,
+        }).map((formula) => structuredClone(formula))
+        return { catalogVersion: FORMULA_CATALOG_VERSION, provenance: FORMULA_PROVENANCE, formulas }
+      }
+      case 'get_formula': {
+        const { formulaId } = schemas.get_formula.parse(args)
+        const formula = getFormula(formulaId)
+        if (!formula) return fail('not_found')
+        if (formula.subject !== context.subject) return fail('scope_violation')
+        return { catalogVersion: FORMULA_CATALOG_VERSION, provenance: FORMULA_PROVENANCE, formula }
+      }
       case 'list_questions': {
         const { offset = 0, limit = 10 } = schemas.list_questions.parse(args)
         const chosen = context.questionIds.slice(offset, offset + limit)
@@ -935,7 +971,29 @@ export function createAgentToolRegistry(input: AgentToolContext, adapters: Agent
       } catch {
         return fail('invalid_result')
       }
-      return { output }
+      // Only successfully bounded local results enter this host-controlled receipt ledger.
+      if (name === 'search_formulas' || name === 'get_formula') {
+        const formulas =
+          name === 'search_formulas'
+            ? (output as { formulas: FormulaEntry[] }).formulas
+            : [(output as { formula: FormulaEntry }).formula]
+        for (const formula of formulas)
+          formulaReferences.set(formula.id, {
+            formulaId: formula.id,
+            catalogVersion: FORMULA_CATALOG_VERSION,
+            entryVersion: formula.version,
+            title: formula.title,
+            expression: formula.expression,
+            conditions: structuredClone(formula.conditions),
+            sources: structuredClone(formula.sources),
+            provenance: FORMULA_PROVENANCE,
+          })
+      }
+      // Consumers cannot mutate the bundled catalog or the receipt ledger via a result.
+      return {
+        output:
+          name === 'search_formulas' || name === 'get_formula' ? structuredClone(output) : output,
+      }
     } catch (error) {
       if (
         error instanceof WebResearchError &&
@@ -977,7 +1035,11 @@ export function createAgentToolRegistry(input: AgentToolContext, adapters: Agent
       return { output: { error: { code, message: errorMessages[code] } }, isError: true }
     }
   }
-  return { definitions: freeze(definitions), execute }
+  return {
+    definitions: freeze(definitions),
+    execute,
+    getFormulaReferences: () => structuredClone([...formulaReferences.values()]),
+  }
 }
 
 /** A child may research using the same owning session, without local data or delegation tools. */
