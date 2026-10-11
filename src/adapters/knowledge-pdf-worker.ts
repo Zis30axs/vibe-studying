@@ -1,5 +1,6 @@
 import { parentPort, workerData } from 'node:worker_threads'
 import { dirname, join, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { readFile, readdir } from 'node:fs/promises'
 import {
   MAX_KNOWLEDGE_PAGE_TEXT,
@@ -46,9 +47,12 @@ async function extract() {
   }
   const loading = getDocument({
     data: bytes,
-    cMapUrl: join(assets, 'cmaps') + sep,
+    // PDF.js validates factory URLs before consulting our local-only factory.
+    // Windows filesystem separators are not URL separators; encode the path
+    // (including spaces, non-ASCII names, # and %) as a directory file URL.
+    cMapUrl: pathToFileURL(join(assets, 'cmaps') + sep).href,
     cMapPacked: true,
-    standardFontDataUrl: join(assets, 'standard_fonts') + sep,
+    standardFontDataUrl: pathToFileURL(join(assets, 'standard_fonts') + sep).href,
     BinaryDataFactory: LocalPdfAssets,
     useWorkerFetch: false,
     useWasm: false,

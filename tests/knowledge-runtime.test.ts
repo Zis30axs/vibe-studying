@@ -9,7 +9,9 @@ import { copyPdfRuntime } from '../scripts/copy-pdf-runtime.mjs'
 import { createKnowledgePdf } from './fixtures/knowledge-pdf'
 
 it('runs the copied CJS extraction worker with only its packaged ESM runtime from another cwd', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'examcraft-isolated-pdf-'))
+  // Run on both Windows and POSIX: resource directories must be real file URLs,
+  // with a trailing slash and encoded spaces, Unicode, fragments and percent signs.
+  const directory = await mkdtemp(join(tmpdir(), 'examcraft 中文 # % isolated-pdf-'))
   try {
     const workerPath = join(directory, 'knowledge-pdf-worker.cjs')
     await build({
