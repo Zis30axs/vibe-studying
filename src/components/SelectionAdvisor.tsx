@@ -56,7 +56,7 @@ export function SelectionAdvisor({
   const selectionOrigin = useRef<Element | null>(null)
   const selectionDismissed = useRef(true)
   const pointerSelecting = useRef(false)
-  const restoringEdit = useRef(false)
+  const selectionNeedsGesture = useRef(false)
   const [open, setOpen] = useState(false)
   const openRef = useRef(false)
   const [consent, setConsent] = useState(false)
@@ -200,9 +200,9 @@ export function SelectionAdvisor({
           ].includes(event.key)
         )
           return
-        restoringEdit.current = false
+        selectionNeedsGesture.current = false
       }
-      if (restoringEdit.current) return
+      if (selectionNeedsGesture.current) return
       // A textarea can emit a queued select event after focus has already left it.
       if (event.target instanceof HTMLTextAreaElement && event.target !== document.activeElement)
         return
@@ -212,12 +212,13 @@ export function SelectionAdvisor({
       if (!(event.target instanceof Element) || event.target.closest('[data-advisor-exclude]'))
         return
       // Undo/redo may restore a highlighted range. It is an edit, not a new request to share it.
-      restoringEdit.current =
+      selectionNeedsGesture.current =
         event instanceof InputEvent && ['historyUndo', 'historyRedo'].includes(event.inputType)
       dismiss()
     }
     const handleDocumentSelection = () => {
-      if (pointerSelecting.current || restoringEdit.current || selectionDismissed.current) return
+      if (pointerSelecting.current || selectionNeedsGesture.current || selectionDismissed.current)
+        return
       if (panelRef.current?.contains(document.activeElement)) return
       // Keyboard focus on the action must not lose the original textarea selection.
       capture(
@@ -227,7 +228,7 @@ export function SelectionAdvisor({
     const handlePointerDown = (event: PointerEvent) => {
       if (isAdvisorControl(event.target)) return
       dismiss()
-      restoringEdit.current = false
+      selectionNeedsGesture.current = false
       pointerSelecting.current = event.target instanceof Node && root.contains(event.target)
     }
     const handlePointerUp = (event: PointerEvent) => {
@@ -246,6 +247,9 @@ export function SelectionAdvisor({
     }
     const handleBlur = () => {
       pointerSelecting.current = false
+      // Window blur can leave activeElement and its range intact. A queued
+      // textarea select must wait for a fresh keyboard or pointer selection.
+      selectionNeedsGesture.current = true
       dismiss()
     }
     const handleScroll = (event: Event) => {

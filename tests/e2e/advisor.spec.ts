@@ -480,9 +480,25 @@ test('leaving the window or moving focus to another control clears the floating 
   await selectAnswer(page, 'selected phrase', 0, 8)
   await page.evaluate(() => window.dispatchEvent(new Event('blur')))
   await expect(page.locator('.advisor-selection-action')).toHaveCount(0)
+  // Reproduce a native select task queued before blur, with the old textarea
+  // still active. It must not resurrect the dismissed snapshot.
+  await page.locator('#answer-text').evaluate((input) => {
+    input.dispatchEvent(new Event('select', { bubbles: true }))
+  })
+  await expect(page.locator('.advisor-selection-action')).toHaveCount(0)
   await page.evaluate(() => document.dispatchEvent(new Event('selectionchange')))
   await expect(page.locator('.advisor-selection-action')).toHaveCount(0)
-  await selectAnswer(page, 'selected phrase', 0, 8)
+  // A genuine new keyboard selection must still work after focus returns.
+  const answer = page.locator('#answer-text')
+  await answer.focus()
+  await answer.press('Home')
+  await answer.press('Shift+ArrowRight')
+  await expect
+    .poll(() =>
+      answer.evaluate((input: HTMLTextAreaElement) => [input.selectionStart, input.selectionEnd]),
+    )
+    .toEqual([0, 1])
+  await expect(page.locator('.advisor-selection-action')).toBeVisible()
   await page.locator('.question-item:not(.selected)').first().focus()
   await expect(page.locator('.advisor-selection-action')).toHaveCount(0)
   expect(await bodyData()).toEqual([])
