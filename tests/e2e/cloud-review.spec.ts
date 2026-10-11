@@ -257,7 +257,15 @@ test('mock humanities review resets consent and sends current final text and str
   const payload = await app!.evaluate(
     () => (globalThis as typeof globalThis & { humanitiesPayload?: unknown }).humanitiesPayload,
   )
-  expect(payload).toMatchObject({ answer: { text: expectedText, argument: expectedArgument } })
+  // Grading intentionally sends logical content, not local canvas coordinates.
+  // The submitted local snapshot below must still retain the complete document.
+  expect(payload).toMatchObject({
+    answer: {
+      text: expectedText,
+      argument: { version: expectedArgument!.version, roots: expectedArgument!.roots },
+    },
+  })
+  expect(payload).not.toHaveProperty('answer.argument.canvas')
   expect(payload).not.toHaveProperty('answer.blocks')
   expect(payload).not.toHaveProperty('history')
   expect(payload).not.toHaveProperty('attempts')

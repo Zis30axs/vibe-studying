@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { version as appVersion } from '../package.json'
 import type {
   AnswerDraft,
   ArgumentNode,
@@ -1106,7 +1107,7 @@ export default function App() {
               )}
               <footer className="page-footer">
                 <span>
-                  ExamCraft <b>0.2.0</b>
+                  ExamCraft <b>{appVersion}</b>
                 </span>
                 <span>学会一道题，比刷过一道题更重要。</span>
                 <span>记录保存在本机 · 云端审阅需逐次确认</span>

@@ -160,7 +160,7 @@ test('explicit scope and consent; grounded finding accepts only its module and p
   await expect(page.locator('#answer-text')).toHaveValue(finalBefore)
 })
 
-test('selected span is explicit and changing scope resets consent; rejection preserves source', async () => {
+test('selected span is explicit and changing scope resets consent; rejection preserves source', async ({}, testInfo) => {
   const { page, text } = await launch()
   const before = await text.inputValue()
   await page.getByRole('button', { name: '✦ 检查模块', exact: true }).click()
@@ -170,10 +170,55 @@ test('selected span is explicit and changing scope resets consent; rejection pre
   // dispatched native select event. Exercise an actual keyboard selection and
   // verify the visible scope before consenting to the request.
   const snapshot = panel(page).getByLabel('模块原文快照')
+  await snapshot.evaluate((element) => {
+    const events: unknown[] = []
+    const state = window as typeof window & { moduleSelectionEvents?: unknown[] }
+    state.moduleSelectionEvents = events
+    for (const type of ['focusin', 'focusout', 'keydown', 'keyup', 'select', 'selectionchange']) {
+      document.addEventListener(type, (event) => {
+        const area = element as HTMLTextAreaElement
+        events.push({
+          type,
+          key: event instanceof KeyboardEvent ? event.key : undefined,
+          target:
+            event.target instanceof Element ? event.target.outerHTML.slice(0, 240) : 'document',
+          focused: document.activeElement === area,
+          documentFocused: document.hasFocus(),
+          start: area.selectionStart,
+          end: area.selectionEnd,
+          defaultPrevented: event.defaultPrevented,
+        })
+      })
+    }
+  })
   await snapshot.focus()
+  await expect(snapshot).toBeFocused()
   await snapshot.press('ControlOrMeta+Home')
   for (let index = 0; index < 4; index++) await snapshot.press('ArrowRight')
   for (let index = 0; index < 4; index++) await snapshot.press('Shift+ArrowRight')
+  await testInfo.attach('module-selection-events', {
+    body: JSON.stringify(
+      await page.evaluate(
+        () =>
+          (window as typeof window & { moduleSelectionEvents?: unknown[] }).moduleSelectionEvents,
+      ),
+      null,
+      2,
+    ),
+    contentType: 'application/json',
+  })
+  await expect
+    .poll(() =>
+      snapshot.evaluate((element) => {
+        const area = element as HTMLTextAreaElement
+        return {
+          focused: document.activeElement === area,
+          start: area.selectionStart,
+          end: area.selectionEnd,
+        }
+      }),
+    )
+    .toEqual({ focused: true, start: 4, end: 8 })
   await expect(
     panel(page).getByText(`限定片段：${before.slice(4, 8)}`, { exact: true }),
   ).toBeVisible()

@@ -697,7 +697,11 @@ async function importSubjectPack(page: Page, path: string) {
     ;(globalThis as typeof globalThis & { pdfPath: string }).pdfPath = path
   }, path)
   await library(page).getByRole('button', { name: '导入教材资料包', exact: true }).click()
-  await expect(library(page)).toContainText('新增 6 份，复用 0 份，失败 0 份')
+  // Six bounded extraction workers run sequentially; the default 5 s locator
+  // budget is shorter than a cold Windows batch, not an import deadline.
+  await expect(library(page)).toContainText('新增 6 份，复用 0 份，失败 0 份', {
+    timeout: 30_000,
+  })
   return page.evaluate(() => window.examcraft!.listKnowledgeDocuments())
 }
 
@@ -840,17 +844,41 @@ test('canceling a pending private-pack manifest picker prevents late import and 
     state.pdfPickerMode = 'pending'
   }, path)
   await library(page).getByRole('button', { name: '导入教材资料包', exact: true }).click()
+  await expect
+    .poll(() =>
+      app!.evaluate(() => {
+        const state = globalThis as typeof globalThis & {
+          pdfPickerCalls: number
+          releasePdfPicker?: () => void
+        }
+        return state.pdfPickerCalls === 1 && typeof state.releasePdfPicker === 'function'
+      }),
+    )
+    .toBe(true)
   await library(page).getByRole('button', { name: '取消导入', exact: true }).click()
   await app!.evaluate(() => {
-    ;(globalThis as typeof globalThis & { releasePdfPicker?: () => void }).releasePdfPicker?.()
+    const state = globalThis as typeof globalThis & { releasePdfPicker?: () => void }
+    if (!state.releasePdfPicker) throw new Error('Expected an open synthetic picker')
+    state.releasePdfPicker()
+    delete state.releasePdfPicker
   })
+  await expect(library(page)).toContainText('资料包导入已取消；已新增 0 份')
+  await expect(
+    library(page).getByRole('button', { name: '导入教材资料包', exact: true }),
+  ).toBeEnabled()
   await expect
     .poll(() => page.evaluate(() => window.examcraft!.listKnowledgeDocuments()))
     .toEqual([])
   await app!.evaluate(() => {
     ;(globalThis as typeof globalThis & { pdfPickerMode: string }).pdfPickerMode = 'selected'
   })
-  await importSubjectPack(page, path)
+  const imported = await importSubjectPack(page, path)
+  expect(imported.map((item) => item.subject).sort()).toEqual([...subjects].sort())
+  expect(
+    await app!.evaluate(
+      () => (globalThis as typeof globalThis & { pdfPickerCalls: number }).pdfPickerCalls,
+    ),
+  ).toBe(2)
   await assertNoPrivateReference(page)
 })
 

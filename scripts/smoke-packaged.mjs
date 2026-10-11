@@ -71,6 +71,7 @@ try {
     const page = await app.firstWindow()
     page.on('pageerror', (error) => errors.push(error.message))
     await expect(page.getByRole('heading', { name: '今天，理解得更深一点。' })).toBeVisible()
+    await expect(page.locator('.page-footer')).toContainText(pkg.version)
     assert.equal(page.url(), 'examcraft://app/index.html')
     await expect(page.getByTestId('activity-heatmap')).toBeHidden()
     await page.locator('details.learning-overview > summary').click()
