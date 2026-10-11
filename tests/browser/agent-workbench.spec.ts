@@ -14,6 +14,9 @@ declare global {
       mode: 'normal' | 'denied' | 'budget'
       lastRequest?: AgentRunRequest
       delayAccept: boolean
+      delayPoll: boolean
+      pollReleased: boolean
+      releasePoll: (() => void) | null
       releaseAccept: (() => void) | null
       finish(): void
       answer(text: string): void
@@ -43,7 +46,7 @@ async function openFixture(page: Page, rememberedWeb = false) {
     const h = React.createElement;
     const baseline = { text: 'Original answer', blocks: [], drawing: { points: [], lines: [], mode: 'cartesian' } };
     const q = { id: 'q1', subject: 'math', kind: 'math', title: 'Synthetic current question', prompt: 'Compute distance', source: 'fixture', tags: [], maxScore: 5 };
-    const f = window.agentFixture = { starts: 0, polls: 0, cancels: 0, accepts: 0, applies: 0, saves: 0, metadataReads: 0, mode: 'normal', delayAccept: false, releaseAccept: null };
+    const f = window.agentFixture = { starts: 0, polls: 0, cancels: 0, accepts: 0, applies: 0, saves: 0, metadataReads: 0, mode: 'normal', delayAccept: false, releaseAccept: null, delayPoll: false, pollReleased: false, releasePoll: null };
     let run = null;
     f.finish = () => { run = { ...run, status: 'complete', elapsedMs: 750, modelRequests: 2, toolCalls: 1, sessionRequests: 2, text: '<scr' + 'ipt>plain model output</scr' + 'ipt>', message: '任务结束。预览尚未写入。', events: [{ sequence: 1, kind: 'tool', tool: 'math_measure', status: 'complete', elapsedMs: 5 }], proposals: f.lastRequest.allowedTools.includes('propose_answer_edit') ? [{ proposalId: 'p1', proposal: { kind: 'answer-edit', questionId: 'q1', expectedText: 'Original answer', replacement: 'Revised answer', reason: 'Synthetic revision' } }] : [] }; };
     const api = {
@@ -77,6 +80,12 @@ async function openFixture(page: Page, rememberedWeb = false) {
       getAgentRun: async id => {
         f.polls++;
         if (f.mode === 'budget') run = { ...run, status: 'failed', modelRequests: 3, toolCalls: 6, sessionRequests: 3, message: '本次 Agent 轮次或工具预算已用尽；没有自动重试。' };
+        if (f.delayPoll) {
+          const late = { ...structuredClone(run), status: 'complete', text: 'LATE_GEOMETRY_OUTPUT', proposals: [{ proposalId: 'late-geometry', proposal: { kind: 'question', question: { ...q, id: 'late-question', title: 'LATE_GEOMETRY_QUESTION', explanation: 'Synthetic reference', rubric: [{ id: 'late-rubric', label: 'Synthetic rubric', keywords: ['synthetic'], points: 5 }] } } }] };
+          await new Promise(resolve => { f.releasePoll = resolve; });
+          f.pollReleased = true;
+          return late;
+        }
         return structuredClone(run);
       },
       cancelAgentRun: async () => { f.cancels++; if (run) run = { ...run, status: 'cancelled', proposals: [] }; },
@@ -379,13 +388,47 @@ test('ordinary math creation request automatically enables local geometry genera
   ).toEqual([0, 0])
   await expect(page.getByRole('button', { name: startLabel, exact: true })).toBeDisabled()
   await page.getByRole('checkbox', { name: parentConsent, exact: true }).check()
+  await page.evaluate(() => {
+    window.agentFixture.delayPoll = true
+  })
   await page.getByRole('button', { name: startLabel, exact: true }).click()
   expect(await page.evaluate(() => window.agentFixture.lastRequest?.allowedTools)).toContain(
     'generate_geometry_question',
   )
   expect(await page.evaluate(() => window.agentFixture.lastRequest?.task)).toBe('出一道空间向量题')
-  await expect(page.getByRole('checkbox', { name: '参数化几何出题', exact: false })).toBeDisabled()
-  await page.getByRole('button', { name: '取消任务', exact: true }).click()
+  // Running tasks intentionally permit scope edits. Changing a capability must
+  // cancel the frozen old scope rather than silently alter its authorization.
+  const generator = page.getByRole('checkbox', { name: '参数化几何出题', exact: false })
+  await expect(generator).toBeEnabled()
+  await expect
+    .poll(() => page.evaluate(() => typeof window.agentFixture.releasePoll))
+    .toBe('function')
+  await generator.uncheck()
+  await expect.poll(() => page.evaluate(() => window.agentFixture.cancels)).toBe(1)
+  await expect(generator).not.toBeChecked()
+  await expect(page.getByRole('checkbox', { name: parentConsent, exact: true })).not.toBeChecked()
+  await expect(page.getByRole('button', { name: startLabel, exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '取消任务', exact: true })).toHaveCount(0)
+  await page.evaluate(async () => {
+    window.agentFixture.releasePoll?.()
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    )
+  })
+  expect(await page.evaluate(() => window.agentFixture.pollReleased)).toBe(true)
+  await expect(page.getByLabel('本次运行状态').getByRole('status')).toContainText(
+    '旧任务与待确认预览已停止',
+  )
+  await expect(page.getByText('LATE_GEOMETRY_OUTPUT', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('LATE_GEOMETRY_QUESTION', { exact: true })).toHaveCount(0)
+  await expect(page.getByLabel('完整题目预览', { exact: true })).toHaveCount(0)
+  expect(
+    await page.evaluate(() => [
+      window.agentFixture.starts,
+      window.agentFixture.saves,
+      window.agentFixture.accepts,
+    ]),
+  ).toEqual([1, 0, 0])
 })
 
 test('geometry creation capability respects explicit disable and stays absent from other scopes', async ({
