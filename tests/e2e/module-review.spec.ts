@@ -166,20 +166,25 @@ test('selected span is explicit and changing scope resets consent; rejection pre
   await page.getByRole('button', { name: '✦ 检查模块', exact: true }).click()
   const consent = panel(page).getByRole('checkbox', { name: /我同意将上述检查内容/ })
   await consent.check()
-  // React's onSelect is derived from keyboard/selectionchange events, not a
-  // dispatched native select event. Exercise an actual keyboard selection and
-  // verify the visible scope before consenting to the request.
+  // Focusing this readonly snapshot alone does not establish a Windows keyboard caret.
+  // Drag over the rendered text, just as a user selects a review fragment.
   const snapshot = panel(page).getByLabel('模块原文快照')
   await snapshot.evaluate((element) => {
     const events: unknown[] = []
     const state = window as typeof window & { moduleSelectionEvents?: unknown[] }
     state.moduleSelectionEvents = events
-    for (const type of ['focusin', 'focusout', 'keydown', 'keyup', 'select', 'selectionchange']) {
+    for (const type of [
+      'focusin',
+      'focusout',
+      'mousedown',
+      'mouseup',
+      'select',
+      'selectionchange',
+    ]) {
       document.addEventListener(type, (event) => {
         const area = element as HTMLTextAreaElement
         events.push({
           type,
-          key: event instanceof KeyboardEvent ? event.key : undefined,
           target:
             event.target instanceof Element ? event.target.outerHTML.slice(0, 240) : 'document',
           focused: document.activeElement === area,
@@ -191,11 +196,40 @@ test('selected span is explicit and changing scope resets consent; rejection pre
       })
     }
   })
-  await snapshot.focus()
+  await snapshot.scrollIntoViewIfNeeded()
+  const selectionPoints = await snapshot.evaluate(async (element) => {
+    await document.fonts.ready
+    const area = element as HTMLTextAreaElement
+    const style = getComputedStyle(area)
+    const box = area.getBoundingClientRect()
+    const context = document.createElement('canvas').getContext('2d')!
+    context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+    const spacing = Number.parseFloat(style.letterSpacing) || 0
+    const prefixWidth = (end: number) =>
+      context.measureText(area.value.slice(0, end)).width + end * spacing
+    const left =
+      box.left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft)
+    const y =
+      box.top +
+      Number.parseFloat(style.borderTopWidth) +
+      Number.parseFloat(style.paddingTop) +
+      Number.parseFloat(style.lineHeight) / 2
+    const contentWidth =
+      area.clientWidth -
+      Number.parseFloat(style.paddingLeft) -
+      Number.parseFloat(style.paddingRight)
+    if (prefixWidth(8) >= contentWidth)
+      throw new Error('Selection fixture must fit on the first line')
+    return { start: { x: left + prefixWidth(4), y }, end: { x: left + prefixWidth(8), y } }
+  })
+  await page.mouse.move(selectionPoints.start.x, selectionPoints.start.y)
+  await page.mouse.down()
+  try {
+    await page.mouse.move(selectionPoints.end.x, selectionPoints.end.y, { steps: 12 })
+  } finally {
+    await page.mouse.up()
+  }
   await expect(snapshot).toBeFocused()
-  await snapshot.press('ControlOrMeta+Home')
-  for (let index = 0; index < 4; index++) await snapshot.press('ArrowRight')
-  for (let index = 0; index < 4; index++) await snapshot.press('Shift+ArrowRight')
   await testInfo.attach('module-selection-events', {
     body: JSON.stringify(
       await page.evaluate(

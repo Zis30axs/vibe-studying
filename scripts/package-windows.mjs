@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { collectDependencyNotices } from './dependency-notices.mjs'
 
 // Manual packaging using Electron's official prebuilt runtime. No third-party packager.
 // https://www.electronjs.org/docs/latest/tutorial/application-distribution
@@ -79,32 +80,8 @@ await writeFile(
 const notices = [
   'ExamCraft bundled npm dependency notices',
   'The Electron runtime notices are in LICENSE.electron.txt and LICENSES.chromium.html.',
+  ...(await collectDependencyNotices(root, lock.packages)),
 ]
-for (const [path, entry] of Object.entries(lock.packages).sort(([a], [b]) => a.localeCompare(b))) {
-  if (!path || entry.dev) continue
-  let installed
-  try {
-    installed = JSON.parse(await readFile(join(path, 'package.json'), 'utf8'))
-  } catch (error) {
-    // npm records native bindings for every OS in the lock; only installed
-    // optional dependencies ship. Missing required dependencies still fail.
-    if (entry.optional && error.code === 'ENOENT') continue
-    throw error
-  }
-  if (installed.version !== entry.version)
-    throw new Error(`Dependency differs from lockfile: ${path}`)
-  notices.push(
-    `\n${installed.name}@${installed.version}\nLicense: ${JSON.stringify(installed.license ?? entry.license ?? 'See package source')}`,
-  )
-  const licenses = (await readdir(path)).filter((name) =>
-    /^(licen[cs]e|copying|notice)(\.|$)/i.test(name),
-  )
-  if (!licenses.length) throw new Error(`Missing dependency license notice: ${path}`)
-  for (const name of licenses) {
-    if ((await stat(join(path, name))).isFile())
-      notices.push(await readFile(join(path, name), 'utf8'))
-  }
-}
 await writeFile(join(stage, 'THIRD-PARTY-NOTICES.txt'), notices.join('\n\n'))
 const sourceName = `ExamCraft-${pkg.version}-source.zip`
 await writeFile(
