@@ -169,10 +169,11 @@ test('real palette drags and pointer moves freely without changing logical order
   await page.getByTestId(`text-${second}`).fill('第二条原理，独立保留。')
   const original = await structure(page)
   const x = Number(await page.getByTestId(`block-${first}`).getAttribute('data-x'))
-  await dragNode(page, first, 83, 41)
+  // Move away from the other card; intentional near-drops now form groups.
+  await dragNode(page, first, -20, 41)
   await expect
     .poll(async () => Number(await page.getByTestId(`block-${first}`).getAttribute('data-x')))
-    .toBeCloseTo(x + 83, 0)
+    .toBeCloseTo(x - 20, 0)
   await expect.poll(() => structure(page)).toEqual(original)
   await expect(page.getByTestId('argument-preview')).toHaveValue(/第一条原理[\s\S]*第二条原理/)
   await selectNode(page, second)
@@ -374,4 +375,43 @@ test('nested drafts and manual text survive restart while submission history sta
   await expect(review.getByText(laterMaterial, { exact: true })).toHaveCount(0)
   await expect(review.getByText(/不代表考试阅卷分数/)).toBeVisible()
   await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('explicit compact groups persist through restart, extract with keyboard and undo without changing final text', async () => {
+  let page = await launch()
+  const first = await addWithKeyboard(page, 'principle')
+  const second = await addWithKeyboard(page, 'analysis')
+  await page.getByTestId(`text-${first}`).fill('原创测试观点')
+  await page.getByTestId(`text-${second}`).fill('原创测试解释')
+  await page.locator('#answer-text').fill('独立保存的最终作答')
+  await selectNode(page, second)
+  await page.getByRole('combobox', { name: '组合目标', exact: true }).selectOption(`node:${first}`)
+  await activate(page.getByRole('button', { name: '组合为大模块', exact: true }))
+  await expect(page.locator('.free-group')).toHaveCount(1)
+  await page.getByRole('textbox', { name: '大模块标签', exact: true }).fill('（2）影响分析')
+  const groupId = await page.locator('.free-group').getAttribute('data-group-id')
+  await expect
+    .poll(async () => {
+      const state = await page.evaluate(() => window.examcraft!.loadState())
+      return Object.values(state.drafts).some((draft) =>
+        draft.argument?.groups?.some(
+          (group) => group.id === groupId && group.label === '（2）影响分析',
+        ),
+      )
+    })
+    .toBe(true)
+  await app!.context().tracing.stop()
+  await app!.close()
+  app = undefined
+  page = await launch()
+  await expect(page.locator('.free-group')).toHaveAttribute('data-group-id', groupId!)
+  await expect(page.locator('#answer-text')).toHaveValue('独立保存的最终作答')
+  await page.locator('.free-group').getByRole('button').click()
+  await page.getByRole('combobox', { name: '选择内部小模块', exact: true }).selectOption(second)
+  await activate(page.getByRole('button', { name: '拆出小模块', exact: true }))
+  await expect(page.locator('.free-group')).toHaveCount(0)
+  await activate(page.getByTestId('undo-argument'))
+  await expect(page.locator('.free-group')).toHaveCount(1)
+  await expect(page.getByTestId(`text-${first}`)).toHaveValue('原创测试观点')
+  await expect(page.locator('#answer-text')).toHaveValue('独立保存的最终作答')
 })

@@ -51,7 +51,9 @@ test('choice answer, exact feedback, retry history, draft and restart persistenc
   await page.getByRole('button', { name: '提交并审阅' }).click()
   await expect(page.getByLabel('审阅结果').locator('.score')).toHaveText('4 / 4')
   await page.getByRole('tab', { name: '我的作答' }).click()
-  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.getByRole('region', { name: '作答工作区', exact: true }).evaluate((panel) => {
+    panel.scrollTop = 0
+  })
   await page.screenshot({ path: 'test-results/examcraft-practice.png', fullPage: true })
   await expect(page.getByRole('alert')).toHaveCount(0)
   expect(
@@ -71,7 +73,11 @@ test('choice answer, exact feedback, retry history, draft and restart persistenc
   await page.locator('.history-item').last().click()
   await expect(page.getByLabel('审阅结果').locator('.score')).toHaveText('0 / 4')
   await page.getByText(/查看本次提交的答案/).click()
-  await expect(page.getByText('先核对实践与认识的关系。', { exact: true })).toBeVisible()
+  await expect(
+    page
+      .getByRole('region', { name: '审阅结果', exact: true })
+      .getByText('先核对实践与认识的关系。', { exact: true }),
+  ).toBeVisible()
 })
 
 test('native JSON import succeeds once, duplicate import preserves existing bank', async () => {
@@ -114,15 +120,26 @@ test('closing the window drains a slow in-flight draft write before exit', async
   await expect(page.getByLabel('思考笔记')).toHaveValue('这段草稿在关闭窗口之前仍在写入。')
 })
 
-test('compact practice keeps writing before optional tools and supports collapse and resizing', async () => {
+test('practice keeps the answer beside independently scrolling tools and supports collapse and resizing', async () => {
   const page = await launch()
-  const overview = page.locator('details.learning-overview')
-  await expect(overview).not.toHaveAttribute('open', '')
-  await expect(page.getByTestId('activity-heatmap')).toBeHidden()
-  await overview.locator('summary').click()
-  await expect(page.getByTestId('activity-heatmap')).toBeVisible()
-  await overview.locator('summary').click()
-  await expect(page.getByTestId('activity-heatmap')).toBeHidden()
+  await expect(page.locator('.learning-overview')).toHaveCount(0)
+  await expect(page.getByTestId('activity-heatmap')).toHaveCount(0)
+  await page.getByRole('button', { name: '练习记录 Review & reflect', exact: true }).click()
+  const overview = page.locator('section.history-overview')
+  await expect(overview).toBeVisible()
+  await expect(overview.locator('summary')).toHaveCount(0)
+  await expect(page.locator('details.learning-overview')).toHaveCount(0)
+  await expect(overview.getByTestId('activity-heatmap')).toBeVisible()
+  await page.getByRole('button', { name: '题目练习 Practice', exact: true }).click()
+  await expect(page.locator('.learning-overview')).toHaveCount(0)
+  await expect(page.getByTestId('activity-heatmap')).toHaveCount(0)
+
+  const answer = page.getByRole('region', { name: '作答工作区', exact: true })
+  const tools = page.locator('#tools-panel')
+  const toolsToggle = page.getByRole('button', { name: /^(?:◫\s*)?工具与顾问$/ })
+  await expect(tools).toBeVisible()
+  await expect(answer).toHaveCSS('overflow-y', 'auto')
+  await expect(tools).toHaveCSS('overflow-y', 'auto')
 
   for (const item of [
     { subject: '政治', title: '让社区更新回应居民需求', dock: '文科模块工作台' },
@@ -134,7 +151,7 @@ test('compact practice keeps writing before optional tools and supports collapse
       .getByRole('button', { name: item.subject, exact: true })
       .click()
     await page.locator('.question-item').filter({ hasText: item.title }).click()
-    const dock = page.getByRole('region', { name: `${item.dock}面板`, exact: true })
+    const dock = tools.getByRole('region', { name: `${item.dock}面板`, exact: true })
     const toggle = dock.getByRole('button', { name: item.dock, exact: true })
     const body = dock.locator('.workbench-dock-body')
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
@@ -147,14 +164,22 @@ test('compact practice keeps writing before optional tools and supports collapse
         ),
       ),
     ).toBe(true)
+    await expect(answer.getByRole('region', { name: `${item.dock}面板`, exact: true })).toHaveCount(
+      0,
+    )
+    const answerBounds = (await answer.boundingBox())!
+    const toolsBounds = (await tools.boundingBox())!
+    expect(toolsBounds.x).toBeGreaterThanOrEqual(answerBounds.x + answerBounds.width)
     await page.locator('#answer-text').fill(`Compact draft: ${item.subject}`)
     await toggle.click()
     await expect(toggle).toHaveAttribute('aria-expanded', 'true')
     await expect(body).toBeVisible()
+    // Dock content grows naturally; the outer tools pane owns scrolling and resizing.
+    await expect(body).toHaveCSS('resize', 'none')
+    await expect(body).toHaveCSS('overflow-y', 'visible')
+    await expect(dock.getByRole('button', { name: '扩大视图', exact: true })).toHaveCount(0)
+    await expect(dock.getByRole('button', { name: '紧凑视图', exact: true })).toHaveCount(0)
     if (item.subject === '政治') {
-      await expect(body).toHaveCSS('resize', 'none')
-      await expect(body).toHaveCSS('overflow-y', 'visible')
-      await expect(dock.getByRole('button', { name: '扩大视图', exact: true })).toHaveCount(0)
       const canvas = dock.locator('.free-canvas')
       await expect(canvas).toHaveCSS('resize', 'vertical')
       const compactHeight = (await canvas.boundingBox())!.height
@@ -166,26 +191,56 @@ test('compact practice keeps writing before optional tools and supports collapse
       expect((await canvas.boundingBox())!.height).toBeGreaterThan(compactHeight)
       await dock.getByRole('button', { name: '收起画布', exact: true }).click()
       expect((await canvas.boundingBox())!.height).toBeCloseTo(compactHeight, 0)
-    } else {
-      await expect(body).toHaveCSS('resize', 'vertical')
-      await expect(body).toHaveCSS('overflow-y', 'auto')
-      const compactHeight = (await body.boundingBox())!.height
-      await dock.getByRole('button', { name: '扩大视图', exact: true }).click()
-      await expect(dock.getByRole('button', { name: '紧凑视图', exact: true })).toHaveAttribute(
-        'aria-pressed',
-        'true',
-      )
-      expect((await body.boundingBox())!.height).toBeGreaterThan(compactHeight)
-      await dock.getByRole('button', { name: '紧凑视图', exact: true }).click()
-      expect((await body.boundingBox())!.height).toBeCloseTo(compactHeight, 0)
     }
+    const divider = page.getByRole('separator', { name: '工具与顾问宽度', exact: true })
+    const initialWidth = Number(await divider.getAttribute('aria-valuenow'))
+    await divider.focus()
+    await divider.press('Shift+ArrowLeft')
+    await expect(divider).toHaveAttribute('aria-valuenow', String(initialWidth + 40))
+    expect((await tools.boundingBox())!.width).toBeGreaterThan(toolsBounds.width)
+    await divider.press('Enter')
+    await expect(divider).toHaveAttribute('aria-valuenow', String(initialWidth))
     await toggle.click()
     await expect(body).toBeHidden()
     await expect(page.locator('#answer-text')).toHaveValue(`Compact draft: ${item.subject}`)
   }
 
-  // Exercise responsive CSS at two common desktop content sizes, including narrow layout.
-  for (const width of [900, 1280]) {
+  // Shorten the real window so both actual panes overflow, without altering their contents.
+  await app!.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]
+    window.setMinimumSize(640, 480)
+    window.setContentSize(1280, 560)
+  })
+  await expect.poll(() => page.evaluate(() => window.innerHeight)).toBe(560)
+  const mathToggle = tools.getByRole('button', { name: '数学交互工作台', exact: true })
+  await mathToggle.click()
+  await expect(answer).toHaveCSS('overflow-y', 'auto')
+  await expect(tools).toHaveCSS('overflow-y', 'auto')
+  expect(await answer.evaluate((panel) => panel.scrollHeight > panel.clientHeight)).toBe(true)
+  expect(await tools.evaluate((panel) => panel.scrollHeight > panel.clientHeight)).toBe(true)
+  await answer.evaluate((panel) => {
+    panel.scrollTop = 0
+  })
+  await tools.evaluate((panel) => {
+    panel.scrollTop = 0
+  })
+  const pageScroll = await page.evaluate(() => window.scrollY)
+  await tools.evaluate((panel) => {
+    panel.scrollTop = 120
+  })
+  await expect.poll(() => tools.evaluate((panel) => panel.scrollTop)).toBeGreaterThan(0)
+  expect(await answer.evaluate((panel) => panel.scrollTop)).toBe(0)
+  const toolsScroll = await tools.evaluate((panel) => panel.scrollTop)
+  await answer.evaluate((panel) => {
+    panel.scrollTop = 120
+  })
+  await expect.poll(() => answer.evaluate((panel) => panel.scrollTop)).toBeGreaterThan(0)
+  expect(await tools.evaluate((panel) => panel.scrollTop)).toBe(toolsScroll)
+  expect(await page.evaluate(() => window.scrollY)).toBe(pageScroll)
+  await mathToggle.click()
+
+  // Opening an overlay is explicit after each resize, including the compact question drawer.
+  for (const width of [900, 720, 1280]) {
     await app!.evaluate(({ BrowserWindow }, width) => {
       const window = BrowserWindow.getAllWindows()[0]
       window.setMinimumSize(640, 480)
@@ -196,10 +251,32 @@ test('compact practice keeps writing before optional tools and supports collapse
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true)
-    await expect(page.getByRole('button', { name: '数学交互工作台', exact: true })).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    )
+    if (width < 760) {
+      await expect(page.locator('#question-panel')).toBeHidden()
+      await page.getByRole('button', { name: /^(?:▤\s*)?练习目录$/ }).click()
+      await expect(page.getByRole('dialog', { name: '题目列表', exact: true })).toBeVisible()
+      await page.locator('.question-item').filter({ hasText: '解一元一次方程' }).click()
+      await expect(page.locator('#question-panel')).toBeHidden()
+    }
+    if (width < 1120) {
+      await expect(tools).toBeHidden()
+      await expect(toolsToggle).toHaveAttribute('aria-expanded', 'false')
+      await toolsToggle.click()
+      await expect(tools).toBeVisible()
+      await expect(tools).toHaveAttribute('role', 'dialog')
+      await expect(tools).toHaveAttribute('aria-modal', 'true')
+    } else {
+      await expect(tools).toBeVisible()
+      await expect(toolsToggle).toHaveAttribute('aria-expanded', 'true')
+    }
+    await expect(
+      tools.getByRole('button', { name: '数学交互工作台', exact: true }),
+    ).toHaveAttribute('aria-expanded', 'false')
+    if (width < 1120) {
+      await tools.getByRole('button', { name: '折叠工具与顾问', exact: true }).click()
+      await expect(tools).toBeHidden()
+    }
+    await expect(page.locator('#answer-text')).toHaveValue('Compact draft: 数学')
   }
   await expect(page.getByRole('alert')).toHaveCount(0)
 })

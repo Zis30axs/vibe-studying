@@ -17,26 +17,81 @@ const functions: Record<string, (value: number) => number> = {
 }
 type Node = (x: number, parameters: MathParameters) => number
 
-/** A small arithmetic grammar: no JavaScript evaluation, properties or implicit multiplication. */
-export function parseExpression(source: string): ExpressionEvaluator {
+export interface ParsedExpression {
+  normalizedExpression: string
+  evaluate: ExpressionEvaluator
+}
+type Token = {
+  value: string
+  kind: 'number' | 'symbol' | 'function' | 'operator'
+  implicit?: boolean
+}
+const symbols = new Set(['x', 'a', 'b', 'c', 'pi', 'e'])
+
+/** Tokenize before inserting multiplication: never split arbitrary names or join separated digits. */
+function expressionTokens(source: string): Token[] {
   if (!source.trim()) throw new Error('请输入函数表达式')
   if (source.length > 160) throw new Error('表达式最多 160 个字符')
-  const tokens: string[] = []
-  let offset = 0
-  while (offset < source.length) {
-    const rest = source.slice(offset)
-    const match = /^(?:\s+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|[A-Za-z]+|[+\-*/^()])/.exec(
-      rest,
-    )
-    if (!match) throw new Error(`不支持的字符：${source[offset]}`)
-    offset += match[0].length
-    if (!match[0].trim()) continue
-    tokens.push(match[0])
-    if (tokens.length > 120) throw new Error('表达式过于复杂（最多 120 个符号）')
+  const input = source
+    .replace(/^\s*y\s*=\s*/, '')
+    .replace(/[×·⋅]/g, '*')
+    .replace(/÷/g, '/')
+    .replace(/−/g, '-')
+  if (!input.trim()) throw new Error('y = 后请输入函数表达式')
+  const tokens: Token[] = []
+  function append(token: Token) {
+    const previous = tokens.at(-1)
+    const endsFactor =
+      previous &&
+      (previous.kind === 'number' || previous.kind === 'symbol' || previous.value === ')')
+    const startsFactor = token.kind !== 'operator' || token.value === '('
+    if (endsFactor && startsFactor) {
+      // A numeric suffix may be a typo or subscript; two numeric literals must not be glued together.
+      if (token.kind === 'number' && previous.value !== ')')
+        throw new Error(`「${previous.value} ${token.value}」含义不明确；相乘请写 *`)
+      tokens.push({ value: '*', kind: 'operator', implicit: true })
+    }
+    tokens.push(token)
+    if (tokens.length > 120) throw new Error('表达式过于复杂（最多 120 个符号，含补全的乘号）')
   }
+  let offset = 0
+  while (offset < input.length) {
+    const match = /^(?:\s+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|[A-Za-z]+|[+\-*/^()])/.exec(
+      input.slice(offset),
+    )
+    if (!match) {
+      if (input[offset] === '=') throw new Error('只支持开头的 y =，不能输入其他等式或赋值')
+      throw new Error(`不支持的字符：${input[offset]}`)
+    }
+    const value = match[0]
+    offset += value.length
+    if (!value.trim()) continue
+    if (/^(?:\d|\.)/.test(value)) append({ value, kind: 'number' })
+    else if (/^[A-Za-z]/.test(value)) {
+      if (Object.hasOwn(functions, value)) append({ value, kind: 'function' })
+      else if (symbols.has(value)) append({ value, kind: 'symbol' })
+      // These are the only single-letter variables. Preserve full function/constant names above.
+      else if (/^[abcx]+$/.test(value)) {
+        for (const letter of value) append({ value: letter, kind: 'symbol' })
+      } else {
+        const name = Object.keys(functions).find((name) => value.startsWith(name))
+        if (name) throw new Error(`${name} 需要括号，例如 ${name}(x)；相乘请写 *`)
+        throw new Error(`不支持的符号：${value}；变量仅支持 x、a、b、c，常量为 pi、e`)
+      }
+    } else append({ value, kind: 'operator' })
+  }
+  // Canonical output is also persisted and must remain valid under the same bounds on reloading.
+  if (tokens.map((token) => token.value).join('').length > 160)
+    throw new Error('补全乘号后的表达式最多 160 个字符，请缩短输入')
+  return tokens
+}
+
+/** A bounded arithmetic grammar; no JavaScript evaluation, properties or guessed function names. */
+export function parseFunctionExpression(source: string): ParsedExpression {
+  const tokens = expressionTokens(source)
   let position = 0
   let depth = 0
-  const peek = () => tokens[position]
+  const peek = () => tokens[position]?.value
   const take = (token: string) => peek() === token && ++position > 0
   function nested(build: () => Node): Node {
     if (++depth > 32) throw new Error('表达式嵌套过深（最多 32 层）')
@@ -45,7 +100,7 @@ export function parseExpression(source: string): ExpressionEvaluator {
     return node
   }
   function primary(): Node {
-    const token = tokens[position++]
+    const token = tokens[position++]?.value
     if (token === undefined) throw new Error('表达式不完整')
     if (token === '(') {
       const value = nested(sum)
@@ -86,9 +141,11 @@ export function parseExpression(source: string): ExpressionEvaluator {
   function product(): Node {
     let left = unary()
     while (peek() === '*' || peek() === '/') {
-      const operator = tokens[position++]
+      const operator = tokens[position++].value
       const previous = left
       const right = unary()
+      if (operator === '/' && tokens[position]?.implicit)
+        throw new Error('除号后的省略乘法含义不明确：请用 1/(2*x) 或 (1/2)*x 这样的括号明确范围')
       left =
         operator === '*'
           ? (x, parameters) => previous(x, parameters) * right(x, parameters)
@@ -99,7 +156,7 @@ export function parseExpression(source: string): ExpressionEvaluator {
   function sum(): Node {
     let left = product()
     while (peek() === '+' || peek() === '-') {
-      const operator = tokens[position++]
+      const operator = tokens[position++].value
       const previous = left
       const right = product()
       left =
@@ -111,12 +168,18 @@ export function parseExpression(source: string): ExpressionEvaluator {
   }
   const root = sum()
   if (position !== tokens.length) throw new Error(`意外的符号：${peek()}（乘法请使用 *）`)
-  return (x, parameters = DEFAULT_PARAMETERS) => {
+  const evaluate: ExpressionEvaluator = (x, parameters = DEFAULT_PARAMETERS) => {
     if (!Number.isFinite(x)) return NaN
     if (Object.values(parameters).some((value) => !Number.isFinite(value) || Math.abs(value) > 10))
       throw new Error('参数必须在 -10 到 10 之间')
     return root(x, parameters)
   }
+  return { normalizedExpression: tokens.map((token) => token.value).join(''), evaluate }
+}
+
+/** Compatibility entry point for sampling and persisted-state validation. */
+export function parseExpression(source: string): ExpressionEvaluator {
+  return parseFunctionExpression(source).evaluate
 }
 
 /** Viewport-space segments; never connect across invalid samples or suspected poles. */

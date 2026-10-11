@@ -1,4 +1,6 @@
+import { executeTerrainTool, terrainToolInputSchema } from '../src/domain/terrain'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { version as appVersion } from '../package.json'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { AgentAdapter, QuestionBankAdapter } from '../src/adapters/contracts'
 import { matchesScope } from '../src/adapters/local-question-bank'
@@ -30,7 +32,7 @@ export function createExamCraftMcpServer(
   const project = (question: Awaited<ReturnType<QuestionBankAdapter['get']>>) =>
     referenceAccess === 'full' ? question : studentQuestionProjection(question)
   const server = new McpServer(
-    { name: 'examcraft-local', version: '0.1.0' },
+    { name: 'examcraft-local', version: appVersion },
     { maxToolInputElements: 10000 },
   )
   const result = (value: Record<string, unknown>): CallToolResult => ({
@@ -91,5 +93,23 @@ export function createExamCraftMcpServer(
         return { review: await agent.review(question, validateAnswer(question, draft, true)) }
       }),
   )
+  // A teaching calculator can disclose computed answers. Expose it only to the
+  // startup-authorized teaching role, never through a student request parameter.
+  if (
+    referenceAccess === 'full' &&
+    (!allowedScope.subject || allowedScope.subject === 'geography')
+  ) {
+    server.registerTool(
+      'terrain_calculate',
+      {
+        title: '计算模拟教学地形',
+        description:
+          '严格有界的本地地形计算器。输入模拟地形规格和可选探测点/剖面，返回米制高程、等高线层级、分辨率、水平距离、有符号高差、端点平均坡度百分数和倾角。非真实 DEM 或经纬度。不读取题库答案、不联网、不执行代码；不返回密集网格。计算结果可用于出题或获准的解析，不能当作实测数据。',
+        inputSchema: terrainToolInputSchema,
+        annotations,
+      },
+      async (input) => run(async () => ({ result: executeTerrainTool(input) })),
+    )
+  }
   return server
 }

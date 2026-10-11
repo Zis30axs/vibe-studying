@@ -1,0 +1,860 @@
+/* Shared appearance tokens. No filter inversion: charts retain semantic colors and PDF pixels. */
+:root {
+  color-scheme: light;
+  --app-background: #f5f2ed;
+  --app-surface: #fffdfa;
+  --app-surface-muted: #f0edf2;
+  --app-input: #ffffff;
+  --app-text: #302e38;
+  --app-muted: #6c6473;
+  --app-border: #d8d0df;
+  --app-accent: #73508f;
+  --app-accent-solid: #73508f;
+  --app-accent-soft: #eee5f5;
+  --app-success: #28694d;
+  --app-success-soft: #e9f4ed;
+  --app-warning-text: #77521e;
+  --app-warning-soft: #fff2d9;
+  --app-error: #9c3a35;
+  --app-error-soft: #fff0ec;
+  --app-focus: #77519d;
+  --geo-ocean: #e7f1f6;
+  --geo-land: #f4f1e6;
+  --geo-coast: #a4aba1;
+  --geo-grid: #9aaeb8;
+  --geo-grid-major: #758c96;
+  --geo-annotation-text: #174c56;
+  --geo-label-halo: #fff;
+  --geo-admin-line: #857064;
+  --geo-admin-text: #534639;
+  --warning-text: var(--app-warning-text);
+  --warning-surface: var(--app-warning-soft);
+  --on-accent: #fff;
+  --plot-background: #fbfdfd;
+  --plot-grid: #dce3e7;
+  --plot-axis: #74858e;
+  --plot-curve: #7957bc;
+  --plot-geometry: #167d86;
+  --plot-measure: #b67426;
+  --plot-label: #455b65;
+  --plot-region: #dcebe8;
+  --plot-region-line: #719690;
+  --activity-zero: #e9ede9;
+  --activity-one: #c6e9c8;
+  --activity-two: #7dc98c;
+  --activity-three: #3da66a;
+  --activity-four: #178049;
+  --app-text-muted: var(--app-muted);
+  --surface: var(--app-surface);
+  --surface-muted: var(--app-surface-muted);
+  --panel: var(--app-surface);
+  --input-bg: var(--app-input);
+  --text: var(--app-text);
+  --text-muted: var(--app-muted);
+  --muted: var(--app-muted);
+  --border: var(--app-border);
+  --accent: var(--app-accent);
+  --accent-soft: var(--app-accent-soft);
+  color: var(--app-text);
+  background: var(--app-background);
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --app-background: #1b1c22;
+  --app-surface: #24262e;
+  --app-surface-muted: #2d303b;
+  --app-input: #1d1f27;
+  --app-text: #e7eaf0;
+  --app-muted: #b1b5c2;
+  --app-border: #505565;
+  --app-accent: #ccb8f5;
+  --app-accent-solid: #77529f;
+  --app-accent-soft: #393046;
+  --app-success: #93d9b5;
+  --app-success-soft: #243b32;
+  --app-warning-text: #f0cc8a;
+  --app-warning-soft: #413728;
+  --app-error: #ffb7ad;
+  --app-error-soft: #442f31;
+  --app-focus: #dabaff;
+  --geo-ocean: #223844;
+  --geo-land: #39443d;
+  --geo-coast: #9aa79c;
+  --geo-grid: #61727f;
+  --geo-grid-major: #92a5b3;
+  --geo-annotation-text: #a1e3e0;
+  --geo-label-halo: #20242c;
+  --geo-admin-line: #d0b792;
+  --geo-admin-text: #f3ddba;
+  --plot-background: #20242c;
+  --plot-grid: #3d4450;
+  --plot-axis: #9eacbd;
+  --plot-curve: #c4a3fa;
+  --plot-geometry: #63cbc7;
+  --plot-measure: #efb469;
+  --plot-label: #d2dce8;
+  --plot-region: #304843;
+  --plot-region-line: #88b1a6;
+  --activity-zero: #303a38;
+  --activity-one: #2f6644;
+  --activity-two: #388653;
+  --activity-three: #51aa67;
+  --activity-four: #82cf8c;
+}
+/* Wallpaper stays behind every interactive/content surface; it cannot intercept input. */
+:root .app-shell {
+  isolation: isolate;
+  position: relative;
+}
+.workspace-wallpaper {
+  position: fixed;
+  inset: -28px;
+  pointer-events: none;
+  user-select: none;
+  z-index: -1;
+  contain: strict;
+}
+:root .workspace-shell {
+  background: var(--app-background);
+}
+:root .workspace-shell :is(.page-heading, .workspace-toolbar, .page-footer) {
+  background: color-mix(in srgb, var(--app-background) 96%, transparent);
+  border-radius: 5px;
+}
+:root .workspace-shell .sidebar,
+:root .workspace-shell .topbar {
+  background: var(--app-surface-muted);
+  color: var(--app-text);
+  border-color: var(--app-border);
+}
+:root :is(button, input, textarea, select) {
+  color: var(--app-text);
+  background-color: var(--app-input);
+  border-color: var(--app-border);
+  accent-color: var(--app-accent-solid);
+}
+:root button:hover:not(:disabled) {
+  background-color: var(--app-accent-soft);
+  border-color: var(--app-accent);
+}
+:root :is(button, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--app-focus);
+  outline-offset: 2px;
+}
+:root :is(input, textarea)::placeholder {
+  color: var(--app-muted);
+  opacity: 1;
+}
+:root
+  :is(
+    .card,
+    .stat-card,
+    .learning-overview,
+    .workspace-tools,
+    .workbench-dock,
+    .model-settings,
+    .model-settings-dialog,
+    .advisor-panel,
+    .advisor-selection-action,
+    .knowledge-library,
+    .knowledge-hits li,
+    .appearance-settings,
+    .module-review-panel,
+    .geo-workbench,
+    .geo-workbench .geo-editor,
+    .geo-generator,
+    .github-profile-form,
+    .topbar-profile > .github-profile-error,
+    .topbar-profile > .github-profile-note,
+    .politics-answer,
+    .politics-template,
+    .politics-structure > span,
+    .humanities-workspace-heading,
+    .humanities-preview,
+    .free-node,
+    .free-inspector,
+    .math-coordinate-tooltip,
+    .activity-heatmap
+  ) {
+  background: var(--app-surface);
+  color: var(--app-text);
+  border-color: var(--app-border);
+}
+:root
+  :is(
+    .answer-tabs,
+    .exercise-actions,
+    .review-settings,
+    .sidebar-tip,
+    .subject-filters,
+    .search-input,
+    .session-tag,
+    .kind-pill,
+    .tab-count,
+    .explanation,
+    .humanities-count,
+    .humanities-palette,
+    .humanities-selection,
+    .humanities-cavity,
+    .politics-bank,
+    .politics-block,
+    .politics-preview,
+    .math-workbench,
+    .math-workbench fieldset,
+    .argument-timeline,
+    .tools-panel-heading,
+    .advisor-destination,
+    .advisor-panel textarea[readonly],
+    .knowledge-summary,
+    .knowledge-empty,
+    .knowledge-reader-heading,
+    .knowledge-pdf-stage,
+    .module-review-payload,
+    .module-review-diff > div,
+    .geo-toolbar,
+    .geo-hint,
+    .geo-generator-disclosure
+  ) {
+  background: var(--app-surface-muted);
+  color: var(--app-text);
+  border-color: var(--app-border);
+}
+:root .sidebar-tip {
+  background-image: none;
+}
+:root
+  :is(
+    .model-settings input,
+    .model-settings select,
+    .answer-area textarea,
+    .advisor-panel textarea,
+    .selection-advisor .advisor-panel textarea,
+    .geo-editor input,
+    .geo-editor select,
+    .geo-generator-fields input,
+    .geo-generator-fields select,
+    .math-workbench input,
+    .math-workbench select,
+    .free-composer .free-node textarea,
+    .humanities-node textarea,
+    .humanities-preview > textarea
+  ) {
+  color: var(--app-text);
+  background: var(--app-input);
+  border-color: var(--app-border);
+}
+:root
+  :is(
+    .primary,
+    .geo-workbench .geo-primary,
+    .brand-mark,
+    .math-workbench button[aria-pressed='true']
+  ) {
+  background: var(--app-accent-solid);
+  color: #fff;
+  border-color: var(--app-accent-solid);
+}
+:root :is(.primary, .geo-workbench .geo-primary):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--app-accent-solid) 85%, #000);
+}
+:root :is(.nav-item, .answer-tabs > button, .question-item) {
+  background: transparent;
+  color: var(--app-muted);
+}
+:root
+  :is(
+    .nav-item.active,
+    .question-item.selected,
+    .history-item.selected,
+    .subject-filters button[aria-pressed='true'],
+    .workspace-panel-toggles button[aria-expanded='true'],
+    .humanities-selection.has-selection,
+    .humanities-socket.is-ready,
+    .humanities-socket.is-over,
+    .choice.chosen,
+    .geo-toolbar button[aria-pressed='true'],
+    .geo-point-list button[aria-pressed='true']
+  ) {
+  background: var(--app-accent-soft);
+  color: var(--app-accent);
+  border-color: var(--app-accent);
+}
+:root
+  :is(
+    .question-item.selected strong,
+    .nav-item.active .nav-icon,
+    .nav-item.active small,
+    .answer-tabs > button[aria-selected='true'],
+    .adapter-symbol,
+    .history-item > b,
+    .score strong,
+    .library-footnote > span,
+    .humanities-eyebrow,
+    .politics-count,
+    .tools-panel-heading h2,
+    .workbench-dock-bar > button:first-child,
+    .workspace-tools .workbench-dock-bar > button:first-child,
+    .argument-timeline summary,
+    .free-outline summary,
+    .free-preview summary,
+    .knowledge-library .knowledge-evidence-toggle,
+    .knowledge-metadata-editor summary,
+    .knowledge-result-count
+  ) {
+  color: var(--app-accent);
+}
+:root .answer-tabs > button[aria-selected='true'] {
+  border-bottom-color: var(--app-accent);
+}
+:root
+  :is(
+    .nav-dot,
+    .panel-divider:hover > span,
+    .panel-divider:focus-visible > span,
+    .panel-divider:active > span
+  ) {
+  background: var(--app-accent);
+}
+:root
+  :is(
+    .question-item strong,
+    .question-prompt > p,
+    .breadcrumb b,
+    .sidebar-tip strong,
+    .thinking-label,
+    .review-feedback,
+    .rubric-row b,
+    .submitted-answer,
+    .empty-state h2,
+    .geo-editor label,
+    .politics-structure > span,
+    .activity-record-title
+  ) {
+  color: var(--app-text);
+}
+:root
+  :is(
+    .muted,
+    details,
+    .brand small,
+    .workspace-label,
+    .nav-item small,
+    .nav-icon,
+    .sidebar-tip p,
+    .edition,
+    .local-status,
+    .local-status small,
+    .breadcrumb,
+    .offline-pill,
+    .eyebrow,
+    .page-heading p,
+    .session-tag,
+    .session-tag > span:not(.status-dot),
+    .stat-card > div > span,
+    .stat-card strong small,
+    .stat-note,
+    .library-heading > span,
+    .question-number,
+    .question-item-meta,
+    .question-item-meta i,
+    .question-item small,
+    .library-footnote,
+    .kind-pill,
+    .points-pill,
+    .question-id,
+    .question-source,
+    .save-status,
+    .section-label,
+    .choice-letter,
+    .thinking-label span,
+    .score span,
+    .rubric-row p,
+    .explanation p,
+    .history-item small,
+    .adapter-card > p,
+    .adapter-detail,
+    .page-footer,
+    .empty-state,
+    .empty-state > span,
+    .review-settings-note,
+    .review-provider-options small,
+    .role-boundary-note,
+    .layout-hint,
+    .tools-panel-intro,
+    .tools-panel-heading .eyebrow,
+    .workbench-dock-bar > span,
+    .advisor-muted,
+    .advisor-destination dt,
+    .advisor-excerpt small,
+    .advisor-citations small,
+    .model-destination-preview,
+    .github-profile-identity span,
+    .github-profile-form p,
+    .github-profile-note,
+    .knowledge-summary-meta,
+    .knowledge-import-row p,
+    .knowledge-empty p,
+    .knowledge-empty span,
+    .knowledge-document-meta,
+    .knowledge-range-editor legend,
+    .knowledge-range-editor p,
+    .knowledge-scope-note,
+    .knowledge-extraction-note,
+    .knowledge-security-note,
+    .knowledge-evidence-summary,
+    .knowledge-reader-heading small,
+    .knowledge-pdf-status,
+    .knowledge-subject-row > span,
+    .knowledge-metadata-editor p,
+    .module-review-muted,
+    .module-review-panel small,
+    .module-review-evidence,
+    .module-review-diff span,
+    .math-heading p,
+    .math-heading > span,
+    .math-help,
+    .math-workbench legend,
+    .argument-timeline p,
+    .argument-timeline small,
+    .free-help,
+    .free-node > footer,
+    .free-empty,
+    .free-inspector small,
+    .free-outline li span,
+    .humanities-palette-label,
+    .humanities-empty strong,
+    .humanities-empty p,
+    .humanities-selection,
+    .humanities-cavity-hint,
+    .humanities-preview > header > span,
+    .politics-position,
+    .politics-field-label,
+    .geo-count,
+    .geo-point-list span,
+    .geo-generator-preview-heading span,
+    .activity-heatmap .activity-heading p,
+    .activity-heatmap .activity-timezone,
+    .activity-heatmap .activity-hint,
+    .activity-heatmap .activity-footer,
+    .activity-heatmap .activity-empty,
+    .activity-heatmap .activity-weekdays span,
+    .activity-heatmap .activity-month,
+    .activity-heatmap .activity-record-meta
+  ) {
+  color: var(--app-muted);
+}
+:root
+  :is(
+    .notice,
+    .cloud-consent,
+    .generated-question-note,
+    .model-profile-notice,
+    .advisor-evidence-status,
+    .knowledge-warning,
+    .module-review-stale,
+    .math-measure,
+    .math-confirm,
+    .revision-confirm,
+    .geo-confirm,
+    .geo-generator-caveat,
+    .humanities-sync-confirmation
+  ) {
+  color: var(--app-warning-text);
+  background: var(--app-warning-soft);
+  border-color: color-mix(in srgb, var(--app-warning-text) 55%, var(--app-border));
+}
+:root
+  :is(
+    .humanities-sync-confirmation strong,
+    .humanities-sync-confirmation p,
+    .politics-limit,
+    .knowledge-pack-results span
+  ) {
+  color: var(--app-warning-text);
+}
+:root
+  :is(
+    .error-banner,
+    .humanities-error,
+    .humanities-migration-error,
+    .geography-figure-error,
+    .math-expression-preview.is-invalid
+  ) {
+  color: var(--app-error);
+  background: var(--app-error-soft);
+  border-color: var(--app-error);
+}
+:root
+  :is(
+    .advisor-error,
+    .knowledge-error,
+    .github-profile-error,
+    .geo-generator-error,
+    .appearance-error,
+    .module-review-diff del
+  ) {
+  color: var(--app-error);
+}
+:root
+  :is(
+    .success-banner,
+    .ready-tag,
+    .check.positive,
+    .knowledge-notice,
+    .module-review-confirmation,
+    .module-review-reference,
+    .advisor-reference,
+    .math-expression-preview,
+    .subject-pill,
+    .knowledge-badge
+  ) {
+  color: var(--app-success);
+  background: var(--app-success-soft);
+  border-color: color-mix(in srgb, var(--app-success) 40%, var(--app-border));
+}
+:root
+  :is(
+    .model-key-status,
+    .math-status,
+    .geo-status,
+    .free-snap-preview,
+    .humanities-announcement,
+    .revision-branch,
+    .module-review-diff ins,
+    .completion,
+    .explanation h3
+  ) {
+  color: var(--app-success);
+}
+:root
+  :is(
+    .model-role-settings,
+    .model-diagnostics,
+    .advisor-hint,
+    .advisor-knowledge,
+    .answer-tabs,
+    .exercise-actions,
+    .review-question-figure,
+    .knowledge-reader,
+    .free-canvas,
+    .math-canvas,
+    .activity-details,
+    .argument-timeline li,
+    .workspace-drawer,
+    .workbench-dock-body,
+    .knowledge-range-editor
+  ) {
+  border-color: var(--app-border);
+}
+:root .workspace-panel,
+:root .workspace-answer {
+  scrollbar-color: var(--app-border) transparent;
+}
+:root .humanities-composer {
+  --humanities-ink: var(--app-text);
+  --humanities-muted: var(--app-muted);
+  --humanities-line: var(--app-border);
+}
+:root .politics-composer {
+  --politics-accent: var(--app-accent);
+  --politics-line: var(--app-border);
+}
+:root .free-canvas,
+:root .humanities-canvas {
+  background-color: var(--plot-background);
+  background-image: radial-gradient(var(--plot-grid) 1px, transparent 1px);
+}
+:root .free-group {
+  background: color-mix(in srgb, var(--app-accent-soft) 75%, transparent);
+  border-color: var(--app-border);
+}
+:root .free-group.is-selected {
+  border-color: var(--app-accent);
+  box-shadow: 0 0 0 2px var(--app-accent-soft);
+}
+:root .free-group-handle {
+  background: var(--app-accent-soft);
+  color: var(--app-accent);
+}
+:root .free-node.is-extractable,
+:root .free-node.is-snap-target,
+:root .free-group.is-snap-target {
+  outline-color: var(--app-success);
+}
+:root .free-node .free-remove {
+  color: var(--app-muted);
+  background: transparent;
+}
+:root .free-connections {
+  color: var(--plot-axis);
+}
+:root .free-connections > path {
+  stroke: var(--plot-axis);
+}
+/* Preserve every argument category's hue while changing tint and ink for dark surfaces. */
+:root[data-theme='dark'] [class*='humanities-kind-'] {
+  --block-tint: color-mix(in srgb, var(--block-color) 24%, var(--app-surface)) !important;
+  --block-border: color-mix(in srgb, var(--block-color) 65%, #c5c9d5) !important;
+  --block-ink: color-mix(in srgb, var(--block-color) 25%, #fff) !important;
+}
+:root[data-theme='dark'] .humanities-node-actions button {
+  background: var(--app-surface);
+}
+:root .humanities-palette-block::before,
+:root .humanities-node::before {
+  background: var(--app-surface-muted);
+}
+:root[data-theme='dark']
+  :is(.politics-tag, .politics-tag-material, .politics-tag-analysis, .politics-tag-conclusion) {
+  background: var(--app-accent-soft);
+  color: var(--app-accent);
+}
+/* Math SVG presentation attributes are overridden without touching user-chosen projection colors. */
+:root .math-canvas > rect {
+  fill: var(--plot-background);
+}
+:root .math-canvas [stroke='#e1ebeb'] {
+  stroke: var(--plot-grid);
+}
+:root .math-canvas [stroke='#77949a'] {
+  stroke: var(--plot-axis);
+}
+:root .math-canvas [stroke='#7957bc'] {
+  stroke: var(--plot-curve);
+}
+:root .math-canvas [stroke='#167d86'] {
+  stroke: var(--plot-geometry);
+}
+:root .math-canvas [stroke='#d78a31'] {
+  stroke: var(--plot-measure);
+}
+:root .math-canvas [fill='#7957bc'] {
+  fill: var(--plot-curve);
+}
+:root .math-canvas [fill='#167d86'] {
+  fill: var(--plot-geometry);
+}
+:root .math-canvas [fill='#d78a31'] {
+  fill: var(--plot-measure);
+}
+:root .math-canvas [stroke='white'] {
+  stroke: var(--plot-background);
+}
+:root .math-canvas text {
+  fill: var(--plot-label);
+}
+:root .math-projections .math-projection-label {
+  fill: var(--plot-label);
+  stroke: var(--plot-background);
+}
+:root .geography-figure-frame {
+  fill: var(--plot-background);
+  stroke: var(--plot-grid);
+}
+:root .geography-figure-grid {
+  stroke: var(--plot-grid);
+}
+:root .geography-figure-regions {
+  fill: var(--plot-region);
+  stroke: var(--plot-region-line);
+}
+:root .geography-figure-lines {
+  stroke: var(--plot-axis);
+}
+:root .geography-figure-arrows {
+  stroke: var(--plot-curve);
+  color: var(--plot-curve);
+}
+:root .geography-figure-points,
+:root .geography-figure-labels {
+  fill: var(--plot-label);
+}
+:root .activity-heatmap .activity-day,
+:root .activity-heatmap .activity-swatch {
+  --activity-color: var(--activity-zero);
+  border-color: var(--app-border);
+  background: var(--activity-color);
+}
+:root .activity-heatmap [data-level='1'] {
+  --activity-color: var(--activity-one);
+}
+:root .activity-heatmap [data-level='2'] {
+  --activity-color: var(--activity-two);
+}
+:root .activity-heatmap [data-level='3'] {
+  --activity-color: var(--activity-three);
+}
+:root .activity-heatmap [data-level='4'] {
+  --activity-color: var(--activity-four);
+}
+:root .activity-heatmap .activity-day:hover {
+  background: var(--activity-color);
+  border-color: var(--app-text);
+}
+:root .activity-heatmap .activity-day[aria-pressed='true'] {
+  outline-color: var(--app-focus);
+}
+:root .workspace-shell .appearance-shortcut {
+  padding: 5px 9px;
+  font-size: 11px;
+}
+.appearance-settings {
+  grid-column: 1 / -1;
+  padding: 22px;
+  scroll-margin-top: 16px;
+}
+.appearance-heading,
+.appearance-wallpaper-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.appearance-current {
+  color: var(--app-accent);
+  font-size: 12px;
+}
+.appearance-settings .appearance-help {
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.75;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.appearance-settings fieldset {
+  border: 1px solid var(--app-border);
+  border-radius: 9px;
+  padding: 12px;
+  margin: 16px 0;
+  min-width: 0;
+}
+.appearance-settings legend {
+  font-size: 12px;
+  padding: 0 5px;
+}
+.appearance-theme {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.appearance-theme-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border: 1px solid var(--app-border);
+  border-radius: 7px;
+  flex: 1 1 160px;
+  cursor: pointer;
+}
+.appearance-theme-option.selected {
+  border-color: var(--app-accent);
+  background: var(--app-accent-soft);
+}
+.appearance-theme-option small {
+  display: block;
+  color: var(--app-muted);
+}
+.appearance-theme-option input {
+  margin: 0;
+}
+.appearance-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+.appearance-wallpaper-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px 24px;
+}
+.appearance-wallpaper-controls label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  font-size: 12px;
+}
+.appearance-wallpaper-controls :is(input, select) {
+  width: 100%;
+  grid-column: 1 / -1;
+}
+.appearance-wallpaper-controls input[type='range'] {
+  padding: 0;
+  min-height: 26px;
+}
+.appearance-error {
+  font-size: 12px;
+  line-height: 1.7;
+}
+.appearance-settings fieldset:disabled {
+  opacity: 0.65;
+}
+@media (max-width: 620px) {
+  .appearance-settings {
+    padding: 14px;
+  }
+  .appearance-wallpaper-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root *,
+  :root *::before,
+  :root *::after {
+    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
+  }
+}
+@media (forced-colors: active) {
+  .workspace-wallpaper {
+    display: none;
+  }
+  :root .appearance-theme-option.selected {
+    outline: 2px solid Highlight;
+  }
+  :root :is(.math-canvas, .geo-canvas, .geography-figure) {
+    forced-color-adjust: none;
+  }
+  :root .activity-heatmap .activity-day,
+  :root .activity-heatmap .activity-swatch {
+    forced-color-adjust: none;
+  }
+}
+@media print {
+  .workspace-wallpaper {
+    display: none;
+  }
+}
+
+:root[data-theme='dark'] .politics-tag {
+  background: #30394f;
+  color: #c4d3ff;
+}
+:root[data-theme='dark'] .politics-tag-material {
+  background: #264342;
+  color: #a2e0da;
+}
+:root[data-theme='dark'] .politics-tag-analysis {
+  background: #473b29;
+  color: #f5cf91;
+}
+:root[data-theme='dark'] .politics-tag-conclusion {
+  background: #2c4030;
+  color: #b5deb8;
+}
+:root .teal {
+  background: var(--app-success-soft);
+  color: var(--app-success);
+}
+:root .amber {
+  background: var(--app-warning-soft);
+  color: var(--app-warning-text);
+}
+:root .blue {
+  background: var(--app-accent-soft);
+  color: var(--app-accent);
+}

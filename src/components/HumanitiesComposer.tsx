@@ -28,6 +28,23 @@ import {
   removeArgumentNode,
 } from '../domain/argument'
 
+import {
+  ARGUMENT_CARD_HEIGHT,
+  argumentGroupFor,
+  argumentGroupBounds,
+  assertArgumentGroups,
+  duplicateArgumentGroup,
+  extractArgumentNode,
+  findArgumentSnapTarget,
+  isArgumentNodeOutsideGroup,
+  mergeArgumentEntities,
+  pruneArgumentGroups,
+  removeArgumentGroup,
+  translateArgumentEntity,
+  ungroupArgument,
+  type ArgumentEntity,
+} from '../domain/argument-groups'
+
 import { ModuleReviewPanel } from './ModuleReviewPanel'
 import { ArgumentTimeline } from './ArgumentTimeline'
 import {
@@ -43,6 +60,7 @@ interface HumanitiesComposerProps {
   draft: AnswerDraft
   onChange: (draft: AnswerDraft) => void
   disabled?: boolean
+  active?: boolean
   question?: StudentQuestion
   config?: ModelConfig | null
   api?: ExamCraftApi
@@ -162,14 +180,20 @@ export function HumanitiesComposer({
   subject,
   draft,
   onChange,
-  disabled = false,
+  disabled: disabledProp = false,
+  active: isActive = true,
   question,
   config,
   api,
 }: HumanitiesComposerProps) {
+  const disabled = disabledProp || !isActive
   const id = useId()
   const info = subjectInfo[subject] ?? subjectInfo.politics!
   const [selection, setSelection] = useState<Placement | null>(null)
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
+  const [selectedChildId, setSelectedChildId] = useState<string | null>(null)
+  const [groupTarget, setGroupTarget] = useState('')
+  const [snapTarget, setSnapTarget] = useState<ArgumentEntity | null>(null)
   const [template, setTemplate] = useState<Template>('argument')
   const [error, setError] = useState('')
   const [announcement, setAnnouncement] = useState('')
@@ -183,11 +207,13 @@ export function HumanitiesComposer({
   } | null>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const activeDrag = useRef<Placement | null>(null)
+  const paletteNodeId = useRef('')
   const gesture = useRef<{
     pointerId: number
     startX: number
     startY: number
-    nodeId?: string
+    entity?: ArgumentEntity
+    source: ArgumentDocument
     canvas: ArgumentCanvas
     moved: boolean
   } | null>(null)
@@ -195,6 +221,7 @@ export function HumanitiesComposer({
   const conversion = useMemo(() => {
     try {
       const document = argumentFromDraft(draft)
+      assertArgumentGroups(document.groups, document.roots)
       return {
         document: { ...document, canvas: argumentCanvas(document) },
         generated: generateArgumentText(document.roots),
@@ -218,6 +245,7 @@ export function HumanitiesComposer({
   const flat = useMemo(() => flattenArgument(roots), [roots])
   const selected =
     selection?.type === 'move' ? flat.find(({ node }) => node.id === selection.id) : undefined
+  const selectedGroup = document.groups?.find((group) => group.id === selectedGroupId)
   const atLimit = flat.length >= MAX_ARGUMENT_NODES
 
   useEffect(() => {
@@ -230,6 +258,9 @@ export function HumanitiesComposer({
   useEffect(() => {
     if (hadStructuredDraft.current && !draft.argument && !draft.blocks.length && !draft.text) {
       setSelection(null)
+      setSelectedGroupId(null)
+      setSelectedChildId(null)
+      setSnapTarget(null)
       setHistory([])
       setFuture([])
       setError('')
@@ -242,6 +273,34 @@ export function HumanitiesComposer({
     hadStructuredDraft.current = Boolean(draft.argument || draft.blocks.length)
   }, [draft.argument, draft.blocks, draft.text])
 
+  useEffect(() => {
+    if (disabled || gesture.current || activeDrag.current) cancelGesture()
+  }, [disabled, draft.argument])
+
+  function cancelGesture() {
+    gesture.current = null
+    activeDrag.current = null
+    setPreviewCanvas(null)
+    setSnapTarget(null)
+  }
+  function selectGroup(groupId: string) {
+    setSelectedGroupId(groupId)
+    setSelectedChildId(null)
+    setSelection(null)
+  }
+  function selectNode(nodeId: string, extract = false) {
+    const group = argumentGroupFor(document, nodeId)
+    if (group && !extract && selectedChildId !== nodeId) selectGroup(group.id)
+    else {
+      setSelectedGroupId(null)
+      setSelection({ type: 'move', id: nodeId })
+      if (selectedChildId !== nodeId) setSelectedChildId(null)
+      if (extract && group) {
+        setSelectedChildId(nodeId)
+        setAnnouncement('已选中大模块里的小模块，拖出边框即可拆分；也可点击“拆出小模块”。')
+      }
+    }
+  }
   function attempt(action: () => void) {
     if (disabled) return
     try {
@@ -253,7 +312,9 @@ export function HumanitiesComposer({
   function commit(next: ArgumentDocument, message = '', record = true) {
     if (disabled) return
     generateArgumentText(next.roots)
-    const normalized = { ...next, canvas: argumentCanvas(next) }
+    const cleaned = pruneArgumentGroups(next)
+    assertArgumentGroups(cleaned.groups, cleaned.roots)
+    const normalized = { ...cleaned, canvas: argumentCanvas(cleaned) }
     if (record) {
       setHistory((items) => [...items.slice(-49), document])
       setFuture([])
@@ -277,6 +338,8 @@ export function HumanitiesComposer({
       false,
     )
     setSelection(null)
+    setSelectedGroupId(null)
+    setSelectedChildId(null)
   }
   function redo() {
     if (disabled || !future.length) return
@@ -287,6 +350,9 @@ export function HumanitiesComposer({
       '已重做模块编辑。',
       false,
     )
+    setSelection(null)
+    setSelectedGroupId(null)
+    setSelectedChildId(null)
   }
   function worldPoint(clientX: number, clientY: number): ArgumentPosition {
     const box = viewportRef.current!.getBoundingClientRect()
@@ -298,25 +364,40 @@ export function HumanitiesComposer({
   function centerPoint(): ArgumentPosition {
     const box = viewportRef.current!.getBoundingClientRect()
     const point = worldPoint(box.left + box.width / 2, box.top + box.height / 2)
-    return { x: point.x - 110, y: point.y - 75 }
+    return { x: point.x - 110, y: point.y - 65 }
   }
-  function place(placement: Placement, point: ArgumentPosition, centerView = false) {
+  function place(
+    placement: Placement,
+    point: ArgumentPosition,
+    centerView = false,
+    snapDrop = false,
+  ) {
     attempt(() => {
       if (placement.type === 'new') {
         const node = makeNode(placement.kind)
         const next = { ...document, roots: insertArgumentNode(roots, node, null, roots.length) }
-        const placed = positionArgumentNode(next, node.id, point)
+        let placed = positionArgumentNode(next, node.id, point)
+        const target = snapDrop
+          ? findArgumentSnapTarget(placed, { type: 'node', id: node.id }, placed.canvas!)
+          : null
+        if (target) placed = mergeArgumentEntities(placed, { type: 'node', id: node.id }, target)
         if (centerView && viewportRef.current) {
           const box = viewportRef.current.getBoundingClientRect()
           placed.canvas!.viewport.x = boundArgumentCoordinate(
             box.width / 2 - (point.x + 112) * placed.canvas!.viewport.zoom,
           )
           placed.canvas!.viewport.y = boundArgumentCoordinate(
-            box.height / 2 - (point.y + 75) * placed.canvas!.viewport.zoom,
+            box.height / 2 - (point.y + 65) * placed.canvas!.viewport.zoom,
           )
         }
-        commit(placed, '模块已自由放置；默认追加到成文顺序末尾。')
-        setSelection({ type: 'move', id: node.id })
+        commit(
+          placed,
+          target
+            ? '新模块已紧凑组合，可一起移动或拆分。'
+            : '模块已自由放置；默认追加到成文顺序末尾。',
+        )
+        if (target) selectGroup(argumentGroupFor(placed, node.id)!.id)
+        else setSelection({ type: 'move', id: node.id })
       } else
         commit(
           positionArgumentNode(document, placement.id, point),
@@ -332,13 +413,15 @@ export function HumanitiesComposer({
     // Keyboard insertion finds an empty nearby cell, then brings that location
     // to the viewport center. Explicit pointer drops retain exact coordinates.
     for (let index = 0; index <= MAX_ARGUMENT_NODES; index++) {
-      point = { x: origin.x + (index % 9) * 250, y: origin.y + Math.floor(index / 9) * 175 }
-      if (!occupied.some((p) => Math.abs(p.x - point.x) < 240 && Math.abs(p.y - point.y) < 165))
+      point = { x: origin.x + (index % 9) * 236, y: origin.y + Math.floor(index / 9) * 142 }
+      if (!occupied.some((p) => Math.abs(p.x - point.x) < 230 && Math.abs(p.y - point.y) < 136))
         break
     }
     place(selection, point, true)
   }
   function revealNode(nodeId: string) {
+    setSelectedGroupId(null)
+    setSelectedChildId(nodeId)
     setSelection({ type: 'move', id: nodeId })
     const box = viewportRef.current?.getBoundingClientRect(),
       point = canvas.positions[nodeId]
@@ -348,7 +431,7 @@ export function HumanitiesComposer({
       point.x * zoom + x < 0 ||
       (point.x + 224) * zoom + x > box.width ||
       point.y * zoom + y < 0 ||
-      (point.y + 150) * zoom + y > box.height
+      (point.y + ARGUMENT_CARD_HEIGHT) * zoom + y > box.height
     ) {
       commit(
         {
@@ -358,7 +441,7 @@ export function HumanitiesComposer({
             viewport: {
               ...canvas.viewport,
               x: boundArgumentCoordinate(box.width / 2 - (point.x + 112) * zoom),
-              y: boundArgumentCoordinate(box.height / 2 - (point.y + 75) * zoom),
+              y: boundArgumentCoordinate(box.height / 2 - (point.y + 65) * zoom),
             },
           },
         },
@@ -373,6 +456,7 @@ export function HumanitiesComposer({
       return
     }
     activeDrag.current = { type: 'new', kind }
+    paletteNodeId.current = crypto.randomUUID()
     event.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ owner: id }))
     event.dataTransfer.effectAllowed = 'copy'
   }
@@ -381,78 +465,155 @@ export function HumanitiesComposer({
     try {
       const payload = JSON.parse(event.dataTransfer.getData(DRAG_TYPE))
       if (payload.owner === id && activeDrag.current)
-        place(activeDrag.current, worldPoint(event.clientX, event.clientY))
+        place(activeDrag.current, worldPoint(event.clientX, event.clientY), false, true)
     } catch {
       setError('请从此组装台拖入模块。')
     }
     activeDrag.current = null
+    setSnapTarget(null)
   }
-  function startGesture(event: ReactPointerEvent, nodeId?: string) {
+  function startGesture(event: ReactPointerEvent, nodeId?: string, groupId?: string) {
     if (disabled || event.button !== 0) return
     event.stopPropagation()
-    if (!nodeId && selection?.type === 'new') {
+    if (!nodeId && !groupId && selection?.type === 'new') {
       place(selection, worldPoint(event.clientX, event.clientY))
       return
     }
     event.preventDefault()
     if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus()
     event.currentTarget.setPointerCapture(event.pointerId)
+    const group = groupId
+      ? document.groups?.find((group) => group.id === groupId)
+      : nodeId
+        ? argumentGroupFor(document, nodeId)
+        : undefined
+    const entity: ArgumentEntity | undefined =
+      group && (groupId || selectedChildId !== nodeId)
+        ? { type: 'group', id: group.id }
+        : nodeId
+          ? { type: 'node', id: nodeId }
+          : undefined
     gesture.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      nodeId,
+      entity,
+      source: document,
       canvas: structuredClone(canvas),
       moved: false,
     }
-    if (nodeId) setSelection({ type: 'move', id: nodeId })
+    if (entity?.type === 'group') selectGroup(entity.id)
+    else if (nodeId) {
+      if (selectedChildId !== nodeId) setSelectedChildId(null)
+      setSelection({ type: 'move', id: nodeId })
+    }
+    setSnapTarget(null)
+  }
+  function gestureCanvas(
+    current: NonNullable<typeof gesture.current>,
+    clientX: number,
+    clientY: number,
+  ) {
+    const dx = clientX - current.startX,
+      dy = clientY - current.startY
+    if (current.entity)
+      return translateArgumentEntity(
+        { ...current.source, canvas: current.canvas },
+        current.entity,
+        dx / current.canvas.viewport.zoom,
+        dy / current.canvas.viewport.zoom,
+      )
+    return {
+      ...current.canvas,
+      viewport: {
+        ...current.canvas.viewport,
+        x: boundArgumentCoordinate(current.canvas.viewport.x + dx),
+        y: boundArgumentCoordinate(current.canvas.viewport.y + dy),
+      },
+    }
+  }
+  function gestureSnap(current: NonNullable<typeof gesture.current>, next: ArgumentCanvas) {
+    if (!current.entity) return null
+    if (
+      current.entity.type === 'node' &&
+      argumentGroupFor(current.source, current.entity.id) &&
+      !isArgumentNodeOutsideGroup(current.source, current.entity.id, next)
+    )
+      return null
+    return findArgumentSnapTarget(current.source, current.entity, next)
   }
   function moveGesture(event: ReactPointerEvent) {
     const current = gesture.current
     if (!current || current.pointerId !== event.pointerId) return
     const dx = event.clientX - current.startX,
       dy = event.clientY - current.startY
-    if (Math.abs(dx) + Math.abs(dy) > 2) current.moved = true
-    const next = structuredClone(current.canvas)
-    if (current.nodeId) {
-      const original = current.canvas.positions[current.nodeId]
-      next.positions[current.nodeId] = {
-        x: boundArgumentCoordinate(original.x + dx / next.viewport.zoom),
-        y: boundArgumentCoordinate(original.y + dy / next.viewport.zoom),
-      }
-    } else {
-      next.viewport.x = boundArgumentCoordinate(next.viewport.x + dx)
-      next.viewport.y = boundArgumentCoordinate(next.viewport.y + dy)
-    }
+    if (Math.abs(dx) + Math.abs(dy) > 4) current.moved = true
+    if (!current.moved) return
+    const next = gestureCanvas(current, event.clientX, event.clientY)
     setPreviewCanvas(next)
+    setSnapTarget(gestureSnap(current, next))
   }
   function finishGesture(event: ReactPointerEvent, cancel = false) {
     const current = gesture.current
     if (!current || current.pointerId !== event.pointerId) return
-    if (current.moved && !cancel) {
-      const next = structuredClone(current.canvas)
-      const dx = event.clientX - current.startX,
-        dy = event.clientY - current.startY
-      if (current.nodeId) {
-        const original = current.canvas.positions[current.nodeId]
-        next.positions[current.nodeId] = {
-          x: boundArgumentCoordinate(original.x + dx / next.viewport.zoom),
-          y: boundArgumentCoordinate(original.y + dy / next.viewport.zoom),
+    if (current.moved && !cancel && !disabled) {
+      const nextCanvas = gestureCanvas(current, event.clientX, event.clientY)
+      const target = gestureSnap(current, nextCanvas)
+      attempt(() => {
+        let next: ArgumentDocument = { ...document, canvas: nextCanvas }
+        const entity = current.entity
+        if (entity?.type === 'node' && argumentGroupFor(document, entity.id)) {
+          if (!isArgumentNodeOutsideGroup(current.source, entity.id, nextCanvas)) return
+          next = extractArgumentNode(document, entity.id, nextCanvas.positions[entity.id])
+          setSelectedChildId(null)
         }
-      } else {
-        next.viewport.x = boundArgumentCoordinate(next.viewport.x + dx)
-        next.viewport.y = boundArgumentCoordinate(next.viewport.y + dy)
-      }
-      attempt(() =>
+        if (entity && target) {
+          next = mergeArgumentEntities(next, entity, target)
+          selectGroup(
+            argumentGroupFor(
+              next,
+              entity.type === 'node'
+                ? entity.id
+                : current.source.groups!.find((group) => group.id === entity.id)!.memberIds[0],
+            )!.id,
+          )
+        }
         commit(
-          { ...document, canvas: next },
-          current.nodeId ? '自由位置已保存，成文顺序不变。' : '',
-          Boolean(current.nodeId),
-        ),
-      )
+          next,
+          target
+            ? '已组合成大模块，成员可一起移动；双击标题选中小模块后可拖出。'
+            : entity
+              ? '位置已保存，成文逻辑与正文保持不变。'
+              : '',
+          Boolean(entity),
+        )
+      })
     }
-    gesture.current = null
-    setPreviewCanvas(null)
+    cancelGesture()
+  }
+  function groupSelected() {
+    const source: ArgumentEntity | undefined = selectedGroup
+      ? { type: 'group', id: selectedGroup.id }
+      : selected
+        ? argumentGroupFor(document, selected.node.id)
+          ? { type: 'group', id: argumentGroupFor(document, selected.node.id)!.id }
+          : { type: 'node', id: selected.node.id }
+        : undefined
+    const [type, targetId] = groupTarget.split(':')
+    if (!source || !targetId || (type !== 'node' && type !== 'group')) return
+    attempt(() => {
+      const next = mergeArgumentEntities(document, source, { type, id: targetId })
+      commit(next, '已紧凑组合为大模块，可撤销。')
+      selectGroup(
+        argumentGroupFor(
+          next,
+          source.type === 'node'
+            ? source.id
+            : document.groups!.find((group) => group.id === source.id)!.memberIds[0],
+        )!.id,
+      )
+      setGroupTarget('')
+    })
   }
   function zoomBy(factor: number) {
     const box = viewportRef.current?.getBoundingClientRect()
@@ -481,10 +642,17 @@ export function HumanitiesComposer({
     const box = viewportRef.current?.getBoundingClientRect()
     if (!box || !flat.length) return
     const positions = Object.values(canvas.positions)
-    const minX = Math.min(...positions.map((p) => p.x)),
-      minY = Math.min(...positions.map((p) => p.y))
-    const width = Math.max(...positions.map((p) => p.x + 224)) - minX,
-      height = Math.max(...positions.map((p) => p.y + 160)) - minY
+    const groupBounds = (document.groups ?? []).map((group) => argumentGroupBounds(group, canvas))
+    const minX = Math.min(...positions.map((p) => p.x), ...groupBounds.map((b) => b.x)),
+      minY = Math.min(...positions.map((p) => p.y), ...groupBounds.map((b) => b.y))
+    const width =
+        Math.max(...positions.map((p) => p.x + 224), ...groupBounds.map((b) => b.x + b.width)) -
+        minX,
+      height =
+        Math.max(
+          ...positions.map((p) => p.y + ARGUMENT_CARD_HEIGHT),
+          ...groupBounds.map((b) => b.y + b.height),
+        ) - minY
     const zoom = Math.max(0.15, Math.min(1, (box.width - 40) / width, (box.height - 40) / height))
     commit(
       {
@@ -536,8 +704,8 @@ export function HumanitiesComposer({
       const origin = centerPoint()
       flattenArgument(added).forEach(({ node }, index) => {
         nextCanvas.positions[node.id] = {
-          x: boundArgumentCoordinate(origin.x + (index % 3) * 260),
-          y: boundArgumentCoordinate(origin.y + Math.floor(index / 3) * 180),
+          x: boundArgumentCoordinate(origin.x + (index % 3) * 236),
+          y: boundArgumentCoordinate(origin.y + Math.floor(index / 3) * 142),
         }
       })
       commit(
@@ -556,9 +724,16 @@ export function HumanitiesComposer({
       }
     })
   }
-  function acceptSuggestion(suggestion: ModuleReviewSuggestion): { ok: boolean; message?: string } {
+  function acceptSuggestion(
+    suggestion: ModuleReviewSuggestion,
+    persistedDraft?: AnswerDraft,
+  ): { ok: boolean; message?: string } {
     if (disabled) return { ok: false, message: '当前正在提交，请稍后再修改模块。' }
     try {
+      if (persistedDraft?.argument) {
+        commit(persistedDraft.argument, '已接受此项修改并记录 AI 合并；最终正文未改变。')
+        return { ok: true }
+      }
       const edited = applyModuleSuggestion(document, suggestion)
       const next = checkpointAcceptedEdit(
         document,
@@ -586,6 +761,8 @@ export function HumanitiesComposer({
         : document
       commit(restoreArgumentRevision(saved, revisionId), '模块版本已恢复，原分支与最终正文保留。')
       setSelection(null)
+      setSelectedGroupId(null)
+      setSelectedChildId(null)
     })
   }
 
@@ -614,6 +791,9 @@ export function HumanitiesComposer({
       aria-labelledby={`${id}-heading`}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
+          cancelGesture()
+          setSelectedGroupId(null)
+          setSelectedChildId(null)
           setSelection(null)
           setSyncConfirmation(null)
         }
@@ -663,8 +843,11 @@ export function HumanitiesComposer({
                 onDragStart={(event) => startPaletteDrag(event, kind)}
                 onDragEnd={() => {
                   activeDrag.current = null
+                  setSnapTarget(null)
                 }}
                 onClick={() => {
+                  setSelectedGroupId(null)
+                  setSelectedChildId(null)
                   setSelection({ type: 'new', kind })
                   setAnnouncement('点击画布任意位置放置，或按“放到视野中央”。')
                 }}
@@ -747,7 +930,8 @@ export function HumanitiesComposer({
             {selection?.type === 'new'
               ? `已选「${info.blocks[selection.kind].label}」，点击任意空白处放置。`
               : '拖动模块标题可自由摆放，拖动空白处平移；标题聚焦后方向键移动，Shift 微调。'}{' '}
-            位置不影响成文顺序。
+            靠近后出现组合预览，松开才组合；Esc
+            取消。双击大模块内的小模块标题后拖出可拆解。文字仍可直接编辑，也可用下方组合/拆分按钮。位置不影响成文顺序。
           </p>
           <div
             ref={viewportRef}
@@ -756,16 +940,38 @@ export function HumanitiesComposer({
             tabIndex={0}
             aria-label="自由论证画布，拖动空白处平移，方向键平移"
             onDragOver={(event) => {
-              if (!disabled && event.dataTransfer.types.includes(DRAG_TYPE)) event.preventDefault()
+              if (!disabled && event.dataTransfer.types.includes(DRAG_TYPE)) {
+                event.preventDefault()
+                const placement = activeDrag.current
+                if (placement?.type === 'new') {
+                  const node: ArgumentNode = {
+                    id: paletteNodeId.current,
+                    kind: placement.kind,
+                    text: '',
+                    children: [],
+                  }
+                  const preview = positionArgumentNode(
+                    { ...document, roots: [...roots, node] },
+                    node.id,
+                    worldPoint(event.clientX, event.clientY),
+                  )
+                  setSnapTarget(
+                    findArgumentSnapTarget(preview, { type: 'node', id: node.id }, preview.canvas!),
+                  )
+                }
+              }
             }}
             onDrop={drop}
             onPointerDown={(event) => {
-              if (!(event.target instanceof Element && event.target.closest('.free-node')))
+              if (!(
+                event.target instanceof Element && event.target.closest('.free-node,.free-group')
+              ))
                 startGesture(event)
             }}
             onPointerMove={moveGesture}
             onPointerUp={(event) => finishGesture(event)}
             onPointerCancel={(event) => finishGesture(event, true)}
+            onLostPointerCapture={(event) => finishGesture(event, true)}
             onKeyDown={(event) => {
               if (event.target !== event.currentTarget || disabled) return
               const deltas: Record<string, [number, number]> = {
@@ -836,22 +1042,103 @@ export function HumanitiesComposer({
                     )
                   })}
               </svg>
+              {(document.groups ?? []).map((group) => {
+                const bounds = argumentGroupBounds(
+                  group,
+                  gesture.current?.entity?.type === 'node' &&
+                    group.memberIds.includes(gesture.current.entity.id)
+                    ? document.canvas
+                    : canvas,
+                )
+                return (
+                  <div
+                    key={group.id}
+                    className={`free-group${selectedGroup?.id === group.id ? ' is-selected' : ''}${snapTarget?.type === 'group' && snapTarget.id === group.id ? ' is-snap-target' : ''}`}
+                    style={{
+                      left: bounds.x,
+                      top: bounds.y,
+                      width: bounds.width,
+                      height: bounds.height,
+                    }}
+                    data-testid={`group-${group.id}`}
+                    data-group-id={group.id}
+                  >
+                    <button
+                      type="button"
+                      className="free-group-handle"
+                      data-testid={`drag-group-${group.id}`}
+                      disabled={disabled}
+                      aria-label={`移动大模块 ${group.label || '未命名'}，方向键调整位置`}
+                      aria-pressed={selectedGroup?.id === group.id}
+                      onPointerDown={(event) => startGesture(event, undefined, group.id)}
+                      onClick={() => selectGroup(group.id)}
+                      onKeyDown={(event) => {
+                        const delta: Record<string, [number, number]> = {
+                          ArrowLeft: [-1, 0],
+                          ArrowRight: [1, 0],
+                          ArrowUp: [0, -1],
+                          ArrowDown: [0, 1],
+                        }
+                        if (delta[event.key] && !disabled) {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          const [x, y] = delta[event.key],
+                            step = event.shiftKey ? 1 : 10
+                          attempt(() =>
+                            commit(
+                              {
+                                ...document,
+                                canvas: translateArgumentEntity(
+                                  document,
+                                  { type: 'group', id: group.id },
+                                  x * step,
+                                  y * step,
+                                ),
+                              },
+                              '大模块位置已调整。',
+                            ),
+                          )
+                        }
+                      }}
+                    >
+                      ⠿ {group.label || '未命名大模块'}{' '}
+                      <small>{group.memberIds.length} 个模块</small>
+                    </button>
+                  </div>
+                )
+              })}
               {flat.map(({ node, path, parentId }) => {
                 const position = canvas.positions[node.id]
                 const details = info.blocks[node.kind]
+                const group = argumentGroupFor(document, node.id)
                 return (
                   <article
                     key={node.id}
-                    className={`free-node humanities-kind-${node.kind}${selected?.node.id === node.id ? ' is-selected' : ''}`}
+                    className={`free-node humanities-kind-${node.kind}${selected?.node.id === node.id ? ' is-selected' : ''}${group ? ' is-grouped' : ''}${selectedChildId === node.id && group ? ' is-extractable' : ''}${snapTarget?.type === 'node' && snapTarget.id === node.id ? ' is-snap-target' : ''}`}
                     style={{ left: position.x, top: position.y }}
                     data-testid={`block-${node.id}`}
                     data-block-id={node.id}
                     data-block-kind={node.kind}
                     data-parent-id={parentId ?? ''}
+                    data-group-id={group?.id ?? ''}
                     data-x={position.x}
                     data-y={position.y}
                     aria-label={`${details.label}模块，成文序号 ${path}`}
-                    onClick={() => setSelection({ type: 'move', id: node.id })}
+                    onClick={(event) => {
+                      if (!(
+                        event.target instanceof Element && event.target.closest('textarea,input')
+                      ))
+                        selectNode(node.id)
+                    }}
+                    onDoubleClick={(event) => {
+                      if (!(
+                        event.target instanceof Element &&
+                        event.target.closest('textarea,input,.free-remove')
+                      )) {
+                        event.stopPropagation()
+                        selectNode(node.id, true)
+                      }
+                    }}
                   >
                     <header>
                       <button
@@ -876,16 +1163,26 @@ export function HumanitiesComposer({
                               step = event.shiftKey ? 1 : 10
                             attempt(() =>
                               commit(
-                                positionArgumentNode(document, node.id, {
-                                  x: position.x + x * step,
-                                  y: position.y + y * step,
-                                }),
+                                group
+                                  ? {
+                                      ...document,
+                                      canvas: translateArgumentEntity(
+                                        document,
+                                        { type: 'group', id: group.id },
+                                        x * step,
+                                        y * step,
+                                      ),
+                                    }
+                                  : positionArgumentNode(document, node.id, {
+                                      x: position.x + x * step,
+                                      y: position.y + y * step,
+                                    }),
                                 '位置已调整，成文顺序不变。',
                               ),
                             )
                           }
                         }}
-                        onClick={() => setSelection({ type: 'move', id: node.id })}
+                        onClick={() => selectNode(node.id)}
                       >
                         ⠿ {details.label} <small>{path}</small>
                       </button>
@@ -921,12 +1218,19 @@ export function HumanitiesComposer({
                       rows={2}
                       maxLength={MAX_ARGUMENT_TEXT_LENGTH}
                       disabled={disabled}
-                      onFocus={() => setSelection({ type: 'move', id: node.id })}
+                      onFocus={() => {
+                        setSelectedGroupId(null)
+                        if (selectedChildId !== node.id) setSelectedChildId(null)
+                        setSelection({ type: 'move', id: node.id })
+                      }}
                       onChange={(event) =>
                         attempt(() => commitRoots(updateText(roots, node.id, event.target.value)))
                       }
                     />
                     <footer>
+                      {group
+                        ? `大模块 · ${group.memberIds.indexOf(node.id) + 1} / ${group.memberIds.length} · `
+                        : ''}
                       {parentId
                         ? `属于 ${flat.find((item) => item.node.id === parentId)?.path}`
                         : '主序列'}
@@ -939,6 +1243,156 @@ export function HumanitiesComposer({
               })}
             </div>
           </div>
+          {snapTarget && (
+            <p className="free-snap-preview" role="status">
+              松开即可紧凑组合为一个大模块 · 按 Esc 取消
+            </p>
+          )}
+          {(selected || selectedGroup) && (
+            <div className="free-inspector free-group-tools" aria-label="大模块组合与拆分">
+              <label>
+                组合目标
+                <select
+                  aria-label="组合目标"
+                  value={groupTarget}
+                  disabled={disabled}
+                  onChange={(event) => setGroupTarget(event.target.value)}
+                >
+                  <option value="">选择另一个模块或大模块</option>
+                  {(document.groups ?? [])
+                    .filter(
+                      (group) =>
+                        group.id !== selectedGroup?.id &&
+                        !group.memberIds.includes(selected?.node.id ?? ''),
+                    )
+                    .map((group) => (
+                      <option key={group.id} value={`group:${group.id}`}>
+                        {group.label || '未命名大模块'} · {group.memberIds.length} 个模块
+                      </option>
+                    ))}
+                  {flat
+                    .filter(
+                      ({ node }) =>
+                        node.id !== selected?.node.id && !argumentGroupFor(document, node.id),
+                    )
+                    .map(({ node, path }) => (
+                      <option key={node.id} value={`node:${node.id}`}>
+                        {path} · {info.blocks[node.kind].label} {node.text.slice(0, 16)}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <button type="button" disabled={disabled || !groupTarget} onClick={groupSelected}>
+                组合为大模块
+              </button>
+              {selected && argumentGroupFor(document, selected.node.id) && (
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() =>
+                    attempt(() => {
+                      commit(
+                        extractArgumentNode(document, selected.node.id),
+                        '已拆出小模块，剩余不足两个成员的大模块自动解除。',
+                      )
+                      setSelectedChildId(null)
+                      setSelectedGroupId(null)
+                    })
+                  }
+                >
+                  拆出小模块
+                </button>
+              )}
+            </div>
+          )}
+          {selectedGroup && (
+            <div className="free-inspector" aria-label="所选大模块">
+              <label>
+                大模块标签
+                <input
+                  aria-label="大模块标签"
+                  value={selectedGroup.label}
+                  maxLength={120}
+                  placeholder="可写小题或用途，不自动推断"
+                  disabled={disabled}
+                  onChange={(event) =>
+                    attempt(() =>
+                      commit({
+                        ...document,
+                        groups: document.groups!.map((group) =>
+                          group.id === selectedGroup.id
+                            ? { ...group, label: event.target.value }
+                            : group,
+                        ),
+                      }),
+                    )
+                  }
+                />
+              </label>
+              <label>
+                选择内部小模块
+                <select
+                  aria-label="选择内部小模块"
+                  value=""
+                  disabled={disabled}
+                  onChange={(event) => selectNode(event.target.value, true)}
+                >
+                  <option value="">选择后可拖出或拆分</option>
+                  {selectedGroup.memberIds.map((memberId, index) => {
+                    const node = flat.find(({ node }) => node.id === memberId)!.node
+                    return (
+                      <option key={memberId} value={memberId}>
+                        {index + 1} · {info.blocks[node.kind].label} {node.text.slice(0, 16)}
+                      </option>
+                    )
+                  })}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() =>
+                  attempt(() => {
+                    commit(
+                      ungroupArgument(document, selectedGroup.id),
+                      '已解除大模块，所有小模块和位置保留。',
+                    )
+                    setSelectedGroupId(null)
+                  })
+                }
+              >
+                解除大模块
+              </button>
+              <button
+                type="button"
+                disabled={disabled || atLimit}
+                onClick={() =>
+                  attempt(() => {
+                    const next = duplicateArgumentGroup(document, selectedGroup.id)
+                    commit(next, '已复制大模块及其逻辑子模块，可撤销。')
+                    selectGroup(next.groups![next.groups!.length - 1].id)
+                  })
+                }
+              >
+                复制大模块
+              </button>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() =>
+                  attempt(() => {
+                    commit(
+                      removeArgumentGroup(document, selectedGroup.id),
+                      '已移除大模块成员及其逻辑子模块，可撤销。',
+                    )
+                    setSelectedGroupId(null)
+                  })
+                }
+              >
+                移除大模块及逻辑子模块
+              </button>
+            </div>
+          )}
           {selected && (
             <div className="free-inspector" aria-label="所选模块逻辑关系">
               <strong>
@@ -990,7 +1444,7 @@ export function HumanitiesComposer({
               >
                 成文延后
               </button>
-              <small>逻辑归属与顺序单独设置，不吸附、不限制位置。</small>
+              <small>逻辑归属与顺序单独设置；组合只保存明确分组，不改正文。</small>
             </div>
           )}
           <details className="free-outline">
@@ -1058,7 +1512,9 @@ export function HumanitiesComposer({
           {question && api && (
             <ModuleReviewPanel
               disabled={disabled}
+              active={isActive}
               document={document}
+              draft={{ ...draft, argument: document }}
               question={question}
               config={config ?? null}
               api={api}

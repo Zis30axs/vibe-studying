@@ -360,6 +360,8 @@ export class LocalKnowledgeLibrary {
       const end = scope?.endPage ?? request.endPage ?? document.pageCount
       if (start > document.pageCount || end > document.pageCount)
         throw new Error('检索页码超出文档范围')
+      // Cached extracted text is only usable while its content-addressed source PDF is intact.
+      await this.bytesInternal(document)
       const pages = await this.pages(document)
       const phrase = normalized(request.query)
       const terms = queryTerms(request.query)
@@ -444,6 +446,7 @@ export class LocalKnowledgeLibrary {
         let source = cache.get(documentId)
         if (!source) {
           const document = await this.document(documentId)
+          await this.bytesInternal(document)
           source = { document, pages: await this.pages(document) }
           cache.set(documentId, source)
         }

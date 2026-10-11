@@ -1,5 +1,15 @@
+import type { ReviewKnowledgeApi } from './review-knowledge'
+import type { WebResearchApi } from './web-research'
+import type { LearningGraphApi } from './learning-graph'
+import type { SubmissionAssistance } from './learning-graph'
+import type { TerrainExercise } from './terrain'
+import type { AgentWorkbenchApi } from './agent-workbench'
+import type { AppearanceApi } from './appearance'
+import type { ModelDebugApi } from './model-debug'
+import type { ModelConsentApi } from './model-consent'
 import type { KnowledgeApi } from './knowledge'
 import type { GitHubDisplayProfile } from './github-profile'
+import type { QuestionResearchOrigin, QuestionResearchSource } from './question-research'
 export type Subject = 'chinese' | 'math' | 'english' | 'politics' | 'history' | 'geography'
 export type QuestionKind = 'choice' | Subject
 export type BlockCategory = 'principle' | 'material' | 'analysis' | 'conclusion'
@@ -21,8 +31,16 @@ export interface ArgumentCanvas {
   positions: Record<string, ArgumentPosition>
   viewport: { x: number; y: number; zoom: number }
 }
+export interface ArgumentGroup {
+  id: string
+  /** Optional student-authored label, never an inferred subquestion number. */
+  label: string
+  /** Ordered, flat membership; independent of logical parentage and answer order. */
+  memberIds: string[]
+}
 export interface ArgumentSnapshot {
   roots: ArgumentNode[]
+  groups?: ArgumentGroup[]
   canvas?: ArgumentCanvas
 }
 export interface ArgumentRevision {
@@ -41,6 +59,7 @@ export interface ArgumentRevisions {
 export interface ArgumentDocument {
   version: 1
   roots: ArgumentNode[]
+  groups?: ArgumentGroup[]
   /** Missing on legacy documents; a deterministic layout is generated on first edit. */
   canvas?: ArgumentCanvas
   revisions?: ArgumentRevisions
@@ -89,7 +108,11 @@ export interface Question {
   maxScore: number
   explanation: string
   figure?: GeographyFigure
+  terrain?: TerrainExercise
   provenance?: QuestionProvenance
+  /** Host-assigned generation/source labels. These never verify authenticity as a past exam. */
+  researchOrigin?: QuestionResearchOrigin
+  researchSources?: QuestionResearchSource[]
   choices?: { id: string; text: string }[]
   correctAnswer?: string
   blocks?: AnswerBlock[]
@@ -109,7 +132,10 @@ export type StudentQuestion = Pick<
   | 'maxScore'
   | 'choices'
   | 'figure'
+  | 'terrain'
   | 'provenance'
+  | 'researchOrigin'
+  | 'researchSources'
 >
 export interface GeoPoint {
   id: string
@@ -122,10 +148,20 @@ export interface GeoLine {
   from: string
   to: string
 }
+export interface GeoMapPreferences {
+  layer: 'outline' | 'terrain' | 'admin1'
+  longitude: number
+  latitude: number
+  zoom: number
+  showGrid: boolean
+  showLabels?: boolean
+}
 export interface GeoDrawing {
   points: GeoPoint[]
   lines: GeoLine[]
   mode: 'cartesian' | 'geographic'
+  /** Optional offline map view; older coordinate-only drawings remain unchanged. */
+  map?: GeoMapPreferences
 }
 export interface MathParameters {
   a: number
@@ -137,12 +173,19 @@ export interface MathWorkbenchState {
   expression: string
   parameters: MathParameters
   measurement: string[]
+  /** Optional canvas preferences preserve old drafts and historical snapshots unchanged. */
+  snapStep?: number
+  showProjections?: boolean
+  projectionColor?: string
 }
 export const emptyMathState = (): MathWorkbenchState => ({
   drawing: { points: [], lines: [], mode: 'cartesian' },
   expression: 'a*x^2+b*x+c',
   parameters: { a: 1, b: 0, c: 0 },
   measurement: [],
+  snapStep: 1,
+  showProjections: true,
+  projectionColor: '#b8c0c8',
 })
 export interface AnswerDraft {
   choiceId?: string
@@ -161,6 +204,8 @@ export interface RubricResult {
   feedback: string
 }
 export interface Attempt {
+  /** Immutable provenance at this real submission; absent on legacy records. */
+  assistance?: SubmissionAssistance
   /** Student-safe question snapshot keeps imported/generated figures stable in history. */
   questionSnapshot?: StudentQuestion
   id: string
@@ -180,12 +225,15 @@ export interface StudyState {
   attempts: Attempt[]
 }
 export type ModelProtocol = 'anthropic' | 'gemini' | 'openai-responses' | 'openai-chat'
+export type ModelRole = 'parent' | 'child'
 export interface ModelConfig {
   protocol: ModelProtocol
   baseUrl: string
   model: string
   revision: number
   configured: boolean
+  profileId?: string
+  profileName?: string
 }
 export interface ModelConfigInput {
   protocol: ModelProtocol
@@ -193,6 +241,48 @@ export interface ModelConfigInput {
   model: string
   apiKey?: string
   clearApiKey?: boolean
+}
+export type ModelKeyStatus = 'saved' | 'session' | 'missing' | 'locked'
+export interface ModelProfile extends ModelConfig {
+  profileId: string
+  profileName: string
+  keyStatus: ModelKeyStatus
+}
+export interface ModelProfilesState {
+  revision: number
+  profiles: ModelProfile[]
+  roles: Record<ModelRole, string>
+  secureStorageAvailable: boolean
+}
+export interface ModelProfileInput extends ModelConfigInput {
+  profileId?: string
+  profileName: string
+  /** Explicit choice: persist only via OS encryption; never plaintext fallback. */
+  persistApiKey: boolean
+  expectedRevision: number
+}
+export interface ModelRoleInput {
+  roles: Record<ModelRole, string>
+  expectedRevision: number
+}
+export interface ModelProfileDeleteInput {
+  profileId: string
+  expectedRevision: number
+}
+export interface ModelDiagnosticInput {
+  requestId: string
+  expectedRevision: number
+  profileId?: string
+  protocol: ModelProtocol
+  baseUrl: string
+  model: string
+  apiKey?: string
+  kind: 'list' | 'test'
+}
+export interface ModelDiagnosticResult {
+  error?: { code: string; message: string }
+  models?: { id: string; name?: string }[]
+  latencyMs?: number
 }
 export interface AdvisorRequest {
   requestId: string
@@ -250,6 +340,7 @@ export interface ModuleReviewRequest {
   includeReference: boolean
   /** Logical scope only. No canvas, revision history, or final answer. */
   roots: ArgumentNode[]
+  groups?: (ArgumentGroup & { partial: boolean })[]
   selectedSpans?: ModuleReviewSpan[]
 }
 export interface ModuleReviewResult {
@@ -273,6 +364,7 @@ export interface Capabilities {
   deepseek?: { configured: boolean; model: string; endpoint: string; error?: string }
 }
 export interface GenerateGeographyRequest {
+  mode?: 'schematic' | 'terrain'
   requestId: string
   syllabus: string
   chapter: string
@@ -285,20 +377,39 @@ export interface GeneratedQuestionPreview {
   token: string
   question: StudentQuestion
 }
-export interface ExamCraftApi extends KnowledgeApi {
+export interface ExamCraftApi
+  extends
+    ReviewKnowledgeApi,
+    WebResearchApi,
+    KnowledgeApi,
+    ModelConsentApi,
+    ModelDebugApi,
+    AppearanceApi,
+    AgentWorkbenchApi,
+    LearningGraphApi {
+  cancelModelReview(): Promise<void>
   getGenerationStatus(): Promise<{ used: number; limit: number; pending: number }>
-  generateGeographyQuestion(input: GenerateGeographyRequest): Promise<GeneratedQuestionPreview>
+  generateGeographyQuestion(
+    input: GenerateGeographyRequest,
+    localContext?: { questionId: string; draft: AnswerDraft },
+  ): Promise<GeneratedQuestionPreview>
   acceptGeneratedQuestion(token: string): Promise<StudentQuestion>
   rejectGeneratedQuestion(token: string): Promise<void>
   cancelQuestionGeneration(requestId: string): Promise<void>
   getGitHubProfile(): Promise<GitHubDisplayProfile | null>
   setGitHubProfile(username: string): Promise<GitHubDisplayProfile>
   clearGitHubProfile(): Promise<void>
-  getModelConfig(): Promise<ModelConfig>
+  getModelConfig(role?: ModelRole): Promise<ModelConfig>
+  getModelProfiles(): Promise<ModelProfilesState>
+  diagnoseModel(input: ModelDiagnosticInput): Promise<ModelDiagnosticResult>
+  cancelModelDiagnostic(requestId: string): Promise<void>
+  saveModelProfile(input: ModelProfileInput): Promise<ModelProfilesState>
+  assignModelProfiles(input: ModelRoleInput): Promise<ModelProfilesState>
+  deleteModelProfile(input: ModelProfileDeleteInput): Promise<ModelProfilesState>
   saveModelConfig(input: ModelConfigInput): Promise<ModelConfig>
-  askAdvisor(input: AdvisorRequest): Promise<AdvisorResult>
+  askAdvisor(input: AdvisorRequest, localDraft?: AnswerDraft): Promise<AdvisorResult>
   cancelAdvisor(requestId: string): Promise<void>
-  reviewModules(input: ModuleReviewRequest): Promise<ModuleReviewResult>
+  reviewModules(input: ModuleReviewRequest, localDraft?: AnswerDraft): Promise<ModuleReviewResult>
   cancelModuleReview(requestId: string): Promise<void>
   listQuestions(): Promise<StudentQuestion[]>
   loadState(): Promise<StudyState>
@@ -311,9 +422,9 @@ export interface ExamCraftApi extends KnowledgeApi {
   importQuestionBank(): Promise<{ count: number; canceled: boolean }>
   getCapabilities(): Promise<Capabilities>
 }
-export const emptyDraft = (): AnswerDraft => ({
+export const emptyDraft = (kind?: string): AnswerDraft => ({
   math: emptyMathState(),
   text: '',
   blocks: [],
-  drawing: { points: [], lines: [], mode: 'cartesian' },
+  drawing: { points: [], lines: [], mode: kind === 'geography' ? 'geographic' : 'cartesian' },
 })

@@ -95,6 +95,23 @@
   line-height: 1.7;
   color: #6a8089;
 }
+.math-expression-preview {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 5px;
+  background: #eaf4f1;
+  color: #245b4d;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.math-expression-preview.is-invalid {
+  background: #fff1e8;
+  color: #8b3c26;
+}
+.math-workbench input[aria-invalid='true'] {
+  border-color: #b96549;
+}
 .math-workbench fieldset {
   min-width: 0;
   border: 1px solid #d9e4e7;
@@ -182,4 +199,62 @@
   .math-workbench {
     padding: 12px;
   }
+}
+.math-canvas-frame {
+  position: relative;
+}
+.math-coordinate-tooltip {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  width: 196px;
+  max-width: calc(100% - 16px);
+  box-sizing: border-box;
+  padding: 9px 10px;
+  border: 1px solid #cfdddd;
+  border-radius: 7px;
+  background: rgb(255 255 255 / 95%);
+  box-shadow: 0 3px 12px #173f481a;
+  color: #31525c;
+  font-size: 11px;
+  line-height: 1.65;
+}
+.math-coordinate-tooltip span,
+.math-coordinate-tooltip strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.math-projections .math-projection-label {
+  font-size: 11px;
+  fill: #5d6d76;
+  stroke: #fbfdfd;
+  stroke-width: 4px;
+  paint-order: stroke;
+  stroke-linejoin: round;
+}
+.math-snap-input {
+  display: flex;
+  gap: 7px;
+  margin-top: 6px;
+}
+.math-snap-input button {
+  flex-shrink: 0;
+}
+.math-projection-toggle,
+.math-projection-color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  font-size: 12px;
+}
+.math-projection-toggle input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+.math-projection-color input[type='color'] {
+  width: 44px;
+  height: 30px;
+  padding: 2px;
 }

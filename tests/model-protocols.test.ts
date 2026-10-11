@@ -115,7 +115,7 @@ describe.each(protocols)('%s mock-only protocol', (protocol) => {
       apiKey: key,
     })
     expect(JSON.stringify(config)).not.toContain(key)
-    expect(await readFile(join(directory, 'model-config.json'), 'utf8')).not.toContain(key)
+    expect(await readFile(join(directory, 'model-profiles.json'), 'utf8')).not.toContain(key)
     const result = await models.askAdvisor({
       requestId: 'r1',
       source: 'answer',

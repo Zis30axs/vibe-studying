@@ -1,4 +1,10 @@
-import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
+import {
+  _electron as electron,
+  expect,
+  test,
+  type ElectronApplication,
+  type Page,
+} from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -17,12 +23,32 @@ async function launch() {
   delete env.DEEPSEEK_API_KEY
   app = await electron.launch({ args: ['.'], env })
   const page = await app.firstWindow()
-  const overview = page.locator('details.learning-overview')
-  await expect(overview).not.toHaveAttribute('open', '')
-  await expect(page.getByTestId('activity-heatmap')).toBeHidden()
-  await overview.locator('summary').click()
-  await expect(page.getByTestId('activity-heatmap')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '今天，理解得更深一点。' })).toBeVisible()
+  await expect(page.locator('.learning-overview')).toHaveCount(0)
+  await expect(page.getByTestId('activity-heatmap')).toHaveCount(0)
   return page
+}
+
+async function openHistory(page: Page) {
+  await page
+    .getByRole('navigation', { name: '工作区导航' })
+    .getByRole('button', { name: '练习记录 Review & reflect', exact: true })
+    .click()
+  const overview = page.locator('section.history-overview')
+  await expect(overview).toBeVisible()
+  await expect(overview.locator('summary')).toHaveCount(0)
+  await expect(page.locator('details.learning-overview')).toHaveCount(0)
+  await expect(overview.getByTestId('activity-heatmap')).toBeVisible()
+}
+
+async function openPractice(page: Page) {
+  await page
+    .getByRole('navigation', { name: '工作区导航' })
+    .getByRole('button', { name: '题目练习 Practice', exact: true })
+    .click()
+  await expect(page.getByRole('heading', { name: '今天，理解得更深一点。' })).toBeVisible()
+  await expect(page.locator('.learning-overview')).toHaveCount(0)
+  await expect(page.getByTestId('activity-heatmap')).toHaveCount(0)
 }
 test.beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'examcraft-activity-e2e-'))
@@ -44,12 +70,16 @@ test('heatmap counts persisted submissions, excludes drafts and failures, opens 
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   })
+  await openHistory(page)
   let cell = page.getByTestId(`activity-day-${localDay}`)
   await expect(cell).toHaveAttribute('data-count', '0')
   await expect(cell).toHaveAttribute('data-level', '0')
+  await openPractice(page)
   await page.getByLabel('思考笔记').fill('只有草稿，不应增加提交次数。')
   await expect(page.getByText('已保存到本机', { exact: true })).toBeVisible()
+  await openHistory(page)
   await expect(cell).toHaveAttribute('data-count', '0')
+  await openPractice(page)
   expect(
     await page.evaluate(async () => {
       const draft = {
@@ -65,16 +95,24 @@ test('heatmap counts persisted submissions, excludes drafts and failures, opens 
       }
     }),
   ).toBe('rejected')
+  await openHistory(page)
   await expect(cell).toHaveAttribute('data-count', '0')
+  await openPractice(page)
   await page.getByRole('radio').nth(1).click()
   await page.getByRole('button', { name: '提交并审阅', exact: true }).click()
   await expect(page.getByLabel('审阅结果').locator('.score')).toHaveText('0 / 4')
+  await openHistory(page)
   await expect(cell).toHaveAttribute('data-count', '1')
   await expect(cell).toHaveAttribute('data-level', '1')
+  await openPractice(page)
+  await page.getByRole('tab', { name: /^审阅反馈/ }).click()
   await page.getByRole('button', { name: '重新练习', exact: false }).click()
   await page.getByRole('radio').first().click()
   await page.getByRole('button', { name: '提交并审阅', exact: true }).click()
+  await expect(page.getByLabel('审阅结果').locator('.score')).toHaveText('4 / 4')
+  await openHistory(page)
   await expect(cell).toHaveAttribute('data-count', '2')
+  await expect(cell).toHaveAttribute('data-level', '2')
   const attempts = (await page.evaluate(() => window.examcraft!.loadState())).attempts
   expect(attempts).toHaveLength(2)
   await cell.focus()
@@ -87,6 +125,7 @@ test('heatmap counts persisted submissions, excludes drafts and failures, opens 
   await app!.close()
   app = undefined
   page = await launch()
+  await openHistory(page)
   cell = page.getByTestId(`activity-day-${localDay}`)
   await expect(cell).toHaveAttribute('data-count', '2')
   await cell.click()

@@ -6,6 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { McpAgentAdapter, McpQuestionBankAdapter } from '../src/adapters/mcp-adapters'
+import { DEFAULT_TERRAIN } from '../src/domain/terrain'
 import { emptyDraft, type ArgumentNode } from '../src/shared/types'
 
 function structured(response: Record<string, unknown>): Record<string, unknown> {
@@ -58,12 +59,35 @@ describe('real MCP stdio client/server', () => {
       'get_question',
       'list_questions',
       'review_answer',
+      'terrain_calculate',
     ])
     const questions = await bank.list()
     expect(questions.map((question) => question.id)).toEqual(['geo-choice-1'])
     expect((await bank.get('geo-choice-1')).title).toBe('经纬网中的方向')
     expect((await bank.get('geo-choice-1')).correctAnswer).toBe('C')
     expect((await bank.get('geo-choice-1')).explanation).toBeTruthy()
+  })
+  it('executes the bounded terrain calculator through a real MCP client', async () => {
+    const response = await client.callTool({
+      name: 'terrain_calculate',
+      arguments: {
+        terrain: DEFAULT_TERRAIN,
+        probes: [{ id: 'center', xM: 1000, yM: 1000 }],
+        profile: { from: { xM: 250, yM: 1000 }, to: { xM: 1000, yM: 1000 }, samples: 3 },
+      },
+    })
+    expect(response.isError).not.toBe(true)
+    const result = structured(response).result as any
+    expect(result.probes[0].elevationM).toBe(500)
+    expect(result.profile.meanSignedGradePercent).toBe(30)
+    expect(result.profile.horizontalDistanceM).toBe(750)
+    expect(result).not.toHaveProperty('elevations')
+    const malformed = await client.callTool({
+      name: 'terrain_calculate',
+      arguments: { terrain: { ...DEFAULT_TERRAIN, gridCells: 100000 } },
+    })
+    expect(malformed.isError).toBe(true)
+    expect((await bank.list()).map((q) => q.id)).toEqual(['geo-choice-1'])
   })
   it('cannot widen scope through list, get, or review', async () => {
     expect(await bank.list({ subject: 'politics' })).toEqual([])
@@ -122,6 +146,12 @@ describe('new subjects over real MCP stdio', () => {
           stderr: 'pipe',
         }),
       )
+      expect((await client.listTools()).tools.map((t) => t.name)).not.toContain('terrain_calculate')
+      const forbiddenTerrain = await client.callTool({
+        name: 'terrain_calculate',
+        arguments: { terrain: DEFAULT_TERRAIN, referenceAccess: 'full' },
+      })
+      expect(forbiddenTerrain.isError).toBe(true)
       const listed = await client.callTool({ name: 'list_questions', arguments: {} })
       expect(listed.isError).not.toBe(true)
       const questions = structured(listed).questions as Record<string, unknown>[]

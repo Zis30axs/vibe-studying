@@ -1,3 +1,11 @@
+import { resolveAgentKnowledgeIndex } from '../src/adapters/agent-knowledge'
+import { ReviewKnowledgeIndex, ReviewKnowledgeError } from '../src/adapters/review-knowledge-index'
+import { bindWindowWorkCancellation } from './window-work-lifecycle'
+import { WebResearchStore } from '../src/adapters/web-research-store'
+import { TavilyWebResearchProvider } from '../src/adapters/web-research-provider'
+import type { WebResearchConfigInput } from '../src/shared/web-research'
+import { LearningHelpCoordinator } from '../src/adapters/learning-help-coordinator'
+import { LearningGraphService } from '../src/adapters/learning-graph-service'
 import {
   app,
   BrowserWindow,
@@ -5,8 +13,12 @@ import {
   ipcMain,
   protocol,
   session,
+  safeStorage,
+  clipboard,
+  nativeImage,
   type IpcMainInvokeEvent,
 } from 'electron'
+import { WallpaperStore, WallpaperError, inspectWallpaperRaster } from './wallpaper-store'
 import { readFile } from 'node:fs/promises'
 import { mkdirSync } from 'node:fs'
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -24,7 +36,11 @@ import { canceledKnowledgePackImport } from '../src/shared/knowledge-pack'
 import { readSelectedPdf } from '../src/adapters/local-pdf-file'
 import { LocalQuestionBank } from '../src/adapters/local-question-bank'
 import { GitHubProfileService } from '../src/adapters/github-profile-service'
+import { modelConsentRevokeSchema, type ModelConsentGrantInput } from '../src/shared/model-consent'
+import { ModelConsentStore } from '../src/adapters/model-consent-store'
 import { ModelService } from '../src/adapters/model-service'
+import { AgentService, AgentRunError } from '../src/adapters/agent-service'
+import { osSecretStorage } from '../src/adapters/os-secret-storage'
 import { DeepSeekAgent } from '../src/adapters/deepseek-agent'
 import { LocalRuleAgent } from '../src/adapters/local-rule-agent'
 import { readJsonFile } from '../src/adapters/atomic-json-store'
@@ -35,6 +51,11 @@ import type {
   GenerateGeographyRequest,
   ModuleReviewRequest,
   ModelConfigInput,
+  ModelRole,
+  ModelProfileInput,
+  ModelRoleInput,
+  ModelProfileDeleteInput,
+  ModelDiagnosticInput,
   AnswerDraft,
   SubmissionOptions,
 } from '../src/shared/types'
@@ -74,6 +95,7 @@ if (developmentUrl && developmentUrl !== 'http://127.0.0.1:5173')
   throw new Error('Development URL must be http://127.0.0.1:5173')
 const productionUrl = 'examcraft://app/index.html'
 let mainWindow: BrowserWindow | null = null
+let cancelWindowWork = () => {}
 const pendingWrites = new Set<Promise<unknown>>()
 
 function trackWrite<T>(operation: Promise<T>): Promise<T> {
@@ -119,7 +141,208 @@ function registerIpc(
       return trackWrite(Promise.resolve(result))
     })
   }
+  // Appearance is intentionally outside StudyService, model payloads, exports and debug logs.
+  const appearance = new WallpaperStore(app.getPath('userData'), (bytes) => {
+    inspectWallpaperRaster(bytes)
+    const image = nativeImage.createFromBuffer(bytes)
+    if (image.isEmpty())
+      throw new WallpaperError('图片无法解码，请选择其他 PNG、JPEG 或 WebP 图片。')
+    const size = image.getSize()
+    if (
+      size.width < 1 ||
+      size.height < 1 ||
+      size.width > 8192 ||
+      size.height > 8192 ||
+      size.width * size.height > 24_000_000
+    )
+      throw new WallpaperError('图片尺寸超过壁纸限制。')
+    const clean = image.toPNG()
+    inspectWallpaperRaster(clean)
+    return clean
+  })
+  const safeAppearance = async <T>(operation: () => Promise<T>): Promise<T> => {
+    try {
+      return await operation()
+    } catch (error) {
+      throw new Error(
+        error instanceof WallpaperError ? error.message : '无法处理本地外观设置，请重试。',
+      )
+    }
+  }
+  let wallpaperPickerOpen = false
+  handle('examcraft:get-appearance', () => safeAppearance(() => appearance.get()))
+  handle('examcraft:save-appearance', (input) => safeAppearance(() => appearance.save(input)), true)
+  handle('examcraft:remove-wallpaper', () => safeAppearance(() => appearance.remove()), true)
+  handle('examcraft:reset-appearance', () => safeAppearance(() => appearance.remove(true)), true)
+  handle('examcraft:choose-wallpaper', () =>
+    safeAppearance(async () => {
+      if (!mainWindow || wallpaperPickerOpen)
+        throw new WallpaperError('请先完成已打开的图片选择窗口。')
+      wallpaperPickerOpen = true
+      const owner = mainWindow
+      const ticket = appearance.beginSelection()
+      try {
+        const selection = await dialog.showOpenDialog(owner, {
+          title: '选择本机壁纸（仅存储在本机，不发送给模型）',
+          properties: ['openFile'],
+          filters: [
+            { name: '静态壁纸 · PNG / JPEG / WebP', extensions: ['png', 'jpg', 'jpeg', 'webp'] },
+          ],
+        })
+        if (selection.canceled || !selection.filePaths[0] || owner.isDestroyed())
+          return { canceled: true, appearance: await appearance.get() }
+        return await trackWrite(appearance.importSelectedFile(selection.filePaths[0], ticket))
+      } finally {
+        wallpaperPickerOpen = false
+      }
+    }),
+  )
   const knowledgeImports = new Map<string, AbortController>()
+  cancelWindowWork = () => {
+    models.cancelAll()
+    service.cancelCloudReview()
+    for (const controller of knowledgeImports.values()) controller.abort()
+  }
+  const reviewKnowledge = new ReviewKnowledgeIndex(app.getPath('userData'), {
+    resolveAttempt: async (id) =>
+      (await service.loadState()).attempts.find((attempt) => attempt.id === id),
+    resolveChunks: (ids) => knowledge.resolveChunks(ids),
+    verifyDocument: async (id) => {
+      await knowledge.getBytes(id)
+    },
+  })
+  const safeReviewKnowledge = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work()
+    } catch (error) {
+      throw new Error(
+        error instanceof ReviewKnowledgeError
+          ? error.message
+          : '知识点索引操作未完成；请刷新索引，核对提交、PDF 来源和当前版本后重试。原 PDF 不会修改。',
+      )
+    }
+  }
+  handle(
+    'examcraft:refresh-review-knowledge',
+    (input) => safeReviewKnowledge(() => reviewKnowledge.refresh(input)),
+    true,
+  )
+  handle('examcraft:list-review-knowledge', (input) =>
+    safeReviewKnowledge(() => reviewKnowledge.list(input)),
+  )
+  handle(
+    'examcraft:update-review-knowledge-label',
+    (input) => safeReviewKnowledge(() => reviewKnowledge.updateLabel(input)),
+    true,
+  )
+  handle(
+    'examcraft:associate-review-knowledge',
+    (input) => safeReviewKnowledge(() => reviewKnowledge.associate(input)),
+    true,
+  )
+  handle(
+    'examcraft:remove-review-knowledge-association',
+    (input) => safeReviewKnowledge(() => reviewKnowledge.removeAssociation(input)),
+    true,
+  )
+  handle(
+    'examcraft:remove-review-knowledge-node',
+    (input) => safeReviewKnowledge(() => reviewKnowledge.removeNode(input)),
+    true,
+  )
+  const webResearch = new WebResearchStore(app.getPath('userData'), {
+    secureStorage: osSecretStorage(safeStorage),
+  })
+  const agent = new AgentService(models, {
+    validateWebRevision: async (revision) => {
+      const config = await webResearch.getConfig()
+      if (config.revision !== revision || !config.configured)
+        throw new AgentRunError('联网配置已更改或 Tavily 密钥不可用，请重新确认。')
+    },
+    createWebSession: async (request) => {
+      try {
+        const { key } = await webResearch.resolve(request.configRevision)
+        return new TavilyWebResearchProvider({ apiKey: key }).createSession(request.scope)
+      } catch {
+        throw new AgentRunError('公开联网范围无效或 Tavily 配置不可用，请重新确认。')
+      }
+    },
+    graph: service.graph,
+    captureSnapshot: (id, draft) => service.captureSnapshot(id, draft),
+    applyAnswer: async (questionId, baseline, replacement, learning) => {
+      if (!learning) throw new AgentRunError('建议缺少可确认的作答基线，未应用。')
+      await service.applyLearningEdit(questionId, {
+        branchId: learning.branchId,
+        expectedSnapshotId: learning.snapshotId,
+        draft: { ...baseline, text: replacement },
+      })
+    },
+    trackWrite,
+    getQuestion: (id) => bank.get(id),
+    resolveKnowledge: (ids) => knowledge.resolveChunks(ids),
+    resolveKnowledgeIndex: (input) => resolveAgentKnowledgeIndex(reviewKnowledge, input),
+    searchKnowledge: async (input) =>
+      (await knowledge.search(input)).map(({ score: _score, ...evidence }) => evidence),
+    validateKnowledgeScope: async (scope, subject) => {
+      const document = (await knowledge.list()).find((item) => item.id === scope.documentId)
+      if (!document || document.subject !== subject || scope.endPage > document.pageCount)
+        throw new Error('教材或物理页码不在本次已确认范围内。')
+    },
+    saveQuestion: async (question) => {
+      const questions = await bank.list()
+      if (
+        questions.some(
+          (item) =>
+            item.id === question.id ||
+            item.prompt.normalize('NFKC').replace(/\s+/gu, '') ===
+              question.prompt.normalize('NFKC').replace(/\s+/gu, ''),
+        )
+      )
+        throw new AgentRunError('题目已存在，未覆盖或重复保存。')
+      return bank.importBank({ version: 1, questions: [question] })
+    },
+  })
+  const safeAgent = async <T>(work: () => Promise<T>) => {
+    try {
+      return await work()
+    } catch (error) {
+      throw new Error(
+        error instanceof AgentRunError
+          ? error.message
+          : 'Agent 操作未完成；请确认范围和当前作答版本后重试。',
+      )
+    }
+  }
+  handle('examcraft:get-web-research-config', async () => {
+    try {
+      return await webResearch.getConfig()
+    } catch {
+      throw new Error('无法读取联网配置；原文件未覆盖，请恢复备份。')
+    }
+  })
+  handle(
+    'examcraft:save-web-research-config',
+    async (input) => {
+      agent.cancelCurrent()
+      try {
+        return await webResearch.saveConfig(input as WebResearchConfigInput)
+      } catch {
+        throw new Error('联网配置未保存；请检查密钥、配置版本和系统安全存储，或选择仅本次会话。')
+      }
+    },
+    true,
+  )
+  handle('examcraft:start-agent-run', (input) => safeAgent(() => agent.start(input)))
+  handle('examcraft:get-agent-run', (id) => (typeof id === 'string' ? agent.get(id) : null))
+  handle('examcraft:cancel-agent-run', (id) => {
+    if (typeof id === 'string') agent.cancel(id)
+  })
+  handle(
+    'examcraft:accept-agent-proposal',
+    (input) => safeAgent(() => agent.accept(input as Parameters<AgentService['accept']>[0])),
+    true,
+  )
+  handle('examcraft:discard-agent-proposal', (input) => safeAgent(async () => agent.discard(input)))
   const safeKnowledge = async <T>(operation: () => Promise<T>): Promise<T> => {
     try {
       return await operation()
@@ -234,29 +457,170 @@ function registerIpc(
   handle('examcraft:get-github-profile', () => profiles.get())
   handle('examcraft:set-github-profile', (input) => profiles.bind(input), true)
   handle('examcraft:clear-github-profile', () => profiles.clear(), true)
-  handle('examcraft:get-model-config', () => models.getConfig())
+  handle('examcraft:get-model-config', (role) => models.getConfig(role as ModelRole | undefined))
+  const modelConsents = new ModelConsentStore(app.getPath('userData'))
+  handle('examcraft:get-model-consents', () => modelConsents.getModelConsents())
+  handle(
+    'examcraft:grant-model-consent',
+    (input) => modelConsents.grantModelConsent(input as ModelConsentGrantInput),
+    true,
+  )
+  handle(
+    'examcraft:revoke-model-consent',
+    async (input) => {
+      const parsed = modelConsentRevokeSchema.parse(input)
+      service.cancelCloudReview()
+      models.cancelAll()
+      return modelConsents.revokeModelConsent(parsed)
+    },
+    true,
+  )
+  handle('examcraft:cancel-model-review', () => {
+    service.cancelCloudReview()
+    models.cancelGrading()
+  })
+  handle('examcraft:get-model-debug', () => models.getModelDebug())
+  handle('examcraft:set-model-debug-enabled', (enabled) =>
+    models.setModelDebugEnabled(enabled as boolean),
+  )
+  handle('examcraft:clear-model-debug', () => models.clearModelDebug())
+  handle('examcraft:copy-model-debug', () => clipboard.writeText(models.modelDebugText()))
+  handle('examcraft:get-model-profiles', () => models.getProfiles())
+  handle(
+    'examcraft:save-model-profile',
+    (input) => models.saveProfile(input as ModelProfileInput),
+    true,
+  )
+  handle(
+    'examcraft:assign-model-profiles',
+    (input) => models.assignProfiles(input as ModelRoleInput),
+    true,
+  )
+  handle(
+    'examcraft:delete-model-profile',
+    (input) => models.deleteProfile(input as ModelProfileDeleteInput),
+    true,
+  )
+  handle('examcraft:diagnose-model', (input) => models.diagnoseModel(input as ModelDiagnosticInput))
+  handle('examcraft:cancel-model-diagnostic', (id) => models.cancelModelDiagnostic(id as string))
   handle(
     'examcraft:save-model-config',
     (input) => models.saveConfig(input as ModelConfigInput),
     true,
   )
-  handle('examcraft:ask-advisor', (input) => models.askAdvisor(input as AdvisorRequest))
-  handle('examcraft:cancel-advisor', (id) => models.cancelAdvisor(id as string))
-  handle('examcraft:review-modules', (input) => models.reviewModules(input as ModuleReviewRequest))
-  handle('examcraft:cancel-module-review', (id) => models.cancelModuleReview(id as string))
-  handle('examcraft:generate-geography-question', (input) =>
-    models.generateGeographyQuestion(input as GenerateGeographyRequest),
+  const learningHelp = new LearningHelpCoordinator(service)
+  models.onCancelAll(() => learningHelp.cancelAll())
+  handle(
+    'examcraft:restore-learning-snapshot',
+    (input) =>
+      service.restoreLearningSnapshot(input as { snapshotId: string; expectedHeadId: string }),
+    true,
+  )
+  handle('examcraft:get-learning-graph', () => service.graph?.load())
+  handle(
+    'examcraft:accept-module-suggestion',
+    (input) =>
+      learningHelp.acceptModule(input as Parameters<LearningHelpCoordinator['acceptModule']>[0]),
+    true,
+  )
+  handle('examcraft:reject-learning-help', (id) => learningHelp.reject(id as string), true)
+  handle(
+    'examcraft:ask-advisor',
+    (input, localDraft) => {
+      const request = input as AdvisorRequest
+      return learningHelp.run(
+        {
+          requestId: request.requestId,
+          questionId: request.questionId,
+          kind: 'selection',
+          draft: localDraft as AnswerDraft | undefined,
+          prompt: request.selectedText,
+        },
+        () => models.askAdvisor(request),
+        (result) => result.hint,
+      )
+    },
+    true,
+  )
+  handle('examcraft:cancel-advisor', (id) => {
+    learningHelp.cancel(id as string)
+    return models.cancelAdvisor(id as string)
+  })
+  handle(
+    'examcraft:review-modules',
+    (input, localDraft) => {
+      const request = input as ModuleReviewRequest
+      return learningHelp.run(
+        {
+          requestId: request.requestId,
+          questionId: request.questionId,
+          kind: 'module-review',
+          draft: localDraft as AnswerDraft | undefined,
+          prompt: request.scope === 'all' ? '检查全部模块' : '检查所选模块',
+        },
+        () => models.reviewModules(request),
+        (result) =>
+          [
+            result.summary,
+            ...result.suggestions.map(
+              (suggestion) =>
+                `${suggestion.reason}：${suggestion.edit?.replacement ?? suggestion.evidence}`,
+            ),
+          ].join('\n'),
+      )
+    },
+    true,
+  )
+  handle('examcraft:cancel-module-review', (id) => {
+    learningHelp.cancel(id as string)
+    return models.cancelModuleReview(id as string)
+  })
+  const generatedHelpRequests = new Map<string, string>()
+  handle(
+    'examcraft:generate-geography-question',
+    (input, localContext) => {
+      const request = input as GenerateGeographyRequest
+      const context = localContext as { questionId: string; draft: AnswerDraft } | undefined
+      if (!context) return models.generateGeographyQuestion(request)
+      return learningHelp
+        .run(
+          {
+            requestId: request.requestId,
+            questionId: context.questionId,
+            kind: 'geography-generation',
+            draft: context.draft,
+            prompt: `${request.syllabus} / ${request.chapter} / ${request.difficulty}`,
+          },
+          () => models.generateGeographyQuestion(request),
+          (result) => `${result.question.title}\n${result.question.prompt}`,
+        )
+        .then((result) => {
+          generatedHelpRequests.set(result.token, request.requestId)
+          return result
+        })
+    },
+    true,
   )
   handle(
     'examcraft:accept-generated-question',
     (token) => models.acceptGeneratedQuestion(token as string),
     true,
   )
-  handle('examcraft:reject-generated-question', (token) =>
-    models.rejectGeneratedQuestion(token as string),
+  handle(
+    'examcraft:reject-generated-question',
+    async (token) => {
+      const requestId = generatedHelpRequests.get(token as string)
+      await models.rejectGeneratedQuestion(token as string)
+      if (requestId) {
+        generatedHelpRequests.delete(token as string)
+        await learningHelp.reject(requestId).catch(() => undefined)
+      }
+    },
+    true,
   )
-  handle('examcraft:cancel-question-generation', (id) =>
-    models.cancelQuestionGeneration(id as string),
+  handle(
+    'examcraft:cancel-question-generation',
+    (id) => (learningHelp.cancel(id as string), models.cancelQuestionGeneration(id as string)),
   )
   handle('examcraft:generation-status', () => models.getGenerationStatus())
   app.on('before-quit', () => models.cancelAll())
@@ -382,6 +746,7 @@ function createWindow(): void {
   mainWindow.webContents.on('will-redirect', (event) => event.preventDefault())
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
   const window = mainWindow
+  bindWindowWorkCancellation(window, () => cancelWindowWork())
   let draining = false
   window.on('close', (event) => {
     if (!pendingWrites.size) return
@@ -432,6 +797,7 @@ else {
         workerPath: join(__dirname, 'knowledge-pdf-worker.cjs'),
       })
       const models = new ModelService(app.getPath('userData'), {
+        secureStorage: osSecretStorage(safeStorage),
         resolveQuestion: (id) => bank.get(id),
         resolveKnowledgeChunks: (ids) => knowledge.resolveChunks(ids),
         listQuestions: () => bank.list(),
@@ -446,6 +812,7 @@ else {
           new LocalRuleAgent(),
           deepseek?.configured ? deepseek : undefined,
           (revision) => models.reviewer(revision),
+          new LearningGraphService(app.getPath('userData')),
         ),
         bank,
         models,

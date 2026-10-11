@@ -48,6 +48,10 @@ test('geography drawing, confirmation, submission and restart preserve coordinat
     app = initial.app
     const page = initial.page
     const workbench = page.getByRole('region', { name: '地理绘图工作台', exact: true })
+    // New geography drafts open on the world map. This legacy flow deliberately
+    // exercises Cartesian coordinates; switching an empty drawing needs no reset.
+    await expect(workbench.getByTestId('geography-land')).toBeVisible()
+    await workbench.getByRole('button', { name: '经纬度 ⇄', exact: true }).click()
     await addPoint(workbench, 'A', '1', '2')
     await workbench.getByRole('button', { name: '＋ 新建点', exact: true }).click()
     await addPoint(workbench, 'B', '-3', '4')

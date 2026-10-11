@@ -30,6 +30,7 @@ if (runtimeVersion.replace(/^v/, '') !== pkg.devDependencies.electron)
   throw new Error('Installed Electron runtime differs from the locked release dependency.')
 for (const path of [
   'dist/index.html',
+  'dist/map-assets/MAP_SOURCES.md',
   'dist-electron/main.cjs',
   'dist-electron/preload.cjs',
   'dist-electron/knowledge-pdf-worker.cjs',
@@ -80,6 +81,7 @@ await writeFile(
 const notices = [
   'ExamCraft bundled npm dependency notices',
   'The Electron runtime notices are in LICENSE.electron.txt and LICENSES.chromium.html.',
+  'Offline map assets are derived from Natural Earth public-domain data. Source, version, license, and display limitations: resources/app/dist/map-assets/MAP_SOURCES.md. These layers are reference data, not Google Maps or a PRC-reviewed political map.',
   ...(await collectDependencyNotices(root, lock.packages)),
 ]
 await writeFile(join(stage, 'THIRD-PARTY-NOTICES.txt'), notices.join('\n\n'))
@@ -104,8 +106,10 @@ await writeFile(
     'License: GPL-3.0-only; see LICENSE.ExamCraft.txt. Dependency notices are included.',
     '',
     'Local feedback is a learning aid, not an official exam grade.',
-    'DeepSeek is optional and requires your own safe credential setup and consent per request.',
-    'No real DeepSeek request or credential is used in release tests.',
+    'Cloud models are optional. Saved API keys use available OS encryption only; session-only use is also supported.',
+    'Data is sent only for an explicit request with consent for its receiver and data categories; remembered consent can be revoked in settings.',
+    'No real provider request or credential is used in release tests.',
+    'Offline map source and license notes: resources/app/dist/map-assets/MAP_SOURCES.md.',
     '',
   ].join('\r\n'),
 )

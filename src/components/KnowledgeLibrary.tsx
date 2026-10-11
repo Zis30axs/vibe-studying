@@ -23,6 +23,7 @@ export interface KnowledgeCitationTarget {
 }
 export interface KnowledgeLibraryProps {
   api: KnowledgeApi
+  active?: boolean
   selectedEvidence?: KnowledgeEvidence[]
   onSelectEvidence?: (evidence: KnowledgeEvidence[]) => void
   citation?: KnowledgeCitationTarget | null
@@ -34,6 +35,7 @@ const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : '操作失败，请重试。'
 
 export function KnowledgeLibrary({
+  active = true,
   api,
   selectedEvidence = [],
   onSelectEvidence,
@@ -494,6 +496,10 @@ export function KnowledgeLibrary({
       metadataVersion.current++
     }
   }
+
+  useEffect(() => {
+    if (!active) togglePanel(false)
+  }, [active])
 
   return (
     <section className="knowledge-library" aria-label="教材 PDF 知识库" data-advisor-exclude>

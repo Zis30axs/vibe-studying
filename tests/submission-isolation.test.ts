@@ -65,3 +65,76 @@ it('captures submission before awaits and isolates frozen grading evidence from 
   expect((await service.loadState()).attempts[0].draft).toEqual(captured)
   expect(original).not.toBe(seen!.question)
 })
+
+it('cancels cloud grading before dispatch while retaining the submitted draft', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'examcraft-cancel-before-'))
+  directories.push(dir)
+  const bank = new LocalQuestionBank()
+  let resolveReviewer!: (reviewer: LocalRuleAgent) => void
+  let calls = 0
+  const reviewer = new LocalRuleAgent()
+  const originalReview = reviewer.review.bind(reviewer)
+  reviewer.review = (...args) => {
+    calls++
+    return originalReview(...args)
+  }
+  const service = new StudyService(
+    dir,
+    bank,
+    new LocalRuleAgent(),
+    undefined,
+    () =>
+      new Promise((resolve) => {
+        resolveReviewer = resolve
+      }),
+  )
+  const pending = service.submitAnswer(
+    'pol-choice-1',
+    { ...emptyDraft(), choiceId: 'A' },
+    { provider: 'cloud', cloudConsent: true, configRevision: 0 },
+  )
+  service.cancelCloudReview()
+  resolveReviewer(reviewer)
+  await expect(pending).rejects.toThrow('取消')
+  expect(calls).toBe(0)
+  const state = await service.loadState()
+  expect(state.attempts).toEqual([])
+  expect(state.drafts['pol-choice-1'].choiceId).toBe('A')
+})
+
+it('suppresses a non-cooperative late cloud result after cancel and allows a fresh review', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'examcraft-cancel-after-'))
+  directories.push(dir)
+  const bank = new LocalQuestionBank()
+  const local = new LocalRuleAgent()
+  let release!: () => void
+  let began!: () => void
+  const started = new Promise<void>((resolve) => {
+    began = resolve
+  })
+  let delay = true
+  const reviewer = {
+    name: 'synthetic',
+    review: async (...args: Parameters<LocalRuleAgent['review']>) => {
+      if (delay) {
+        began()
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+      }
+      return local.review(...args)
+    },
+  }
+  const service = new StudyService(dir, bank, local, undefined, async () => reviewer)
+  const draft = { ...emptyDraft(), choiceId: 'A' }
+  const options = { provider: 'cloud' as const, cloudConsent: true, configRevision: 0 }
+  const pending = service.submitAnswer('pol-choice-1', draft, options)
+  await started
+  service.cancelCloudReview()
+  release()
+  await expect(pending).rejects.toThrow('取消')
+  expect((await service.loadState()).attempts).toEqual([])
+  delay = false
+  await service.submitAnswer('pol-choice-1', draft, options)
+  expect((await service.loadState()).attempts).toHaveLength(1)
+})

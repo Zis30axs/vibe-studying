@@ -1,6 +1,12 @@
+import { terrainExerciseSchema } from './terrain-exercise'
 import { z } from 'zod'
 import { subjects } from '../shared/subjects'
 import { geographyFigureSchema, questionProvenanceSchema } from './geography-figure'
+import {
+  questionResearchOriginSchema,
+  questionResearchSourcesSchema,
+  validQuestionResearch,
+} from '../shared/question-research'
 import type { QuestionBankAdapter } from '../adapters/contracts'
 import type { Question, StudentQuestion } from '../shared/types'
 
@@ -28,11 +34,18 @@ export const studentQuestionSchema = z
       .max(10)
       .optional(),
     figure: geographyFigureSchema.optional(),
+    terrain: terrainExerciseSchema.optional(),
     provenance: questionProvenanceSchema.optional(),
+    researchOrigin: questionResearchOriginSchema.optional(),
+    researchSources: questionResearchSourcesSchema.optional(),
   })
   .superRefine((question, ctx) => {
-    if (question.figure && question.subject !== 'geography')
+    if (!validQuestionResearch(question))
+      ctx.addIssue({ code: 'custom', message: '题目来源标识与来源记录不一致' })
+    if ((question.figure || question.terrain) && question.subject !== 'geography')
       ctx.addIssue({ code: 'custom', message: '示意图只适用于地理题' })
+    if (question.figure && question.terrain)
+      ctx.addIssue({ code: 'custom', message: '题目不能同时包含普通示意图与模拟地形' })
     if (question.kind !== 'choice' && question.kind !== question.subject)
       ctx.addIssue({ code: 'custom', message: '题型和学科不一致' })
     if (question.kind === 'choice' && !question.choices)
@@ -58,8 +71,15 @@ export function studentQuestionProjection(question: Question): StudentQuestion {
     tags: question.tags.map((tag) => tag),
     maxScore: question.maxScore,
     ...(question.figure ? { figure: geographyFigureSchema.parse(question.figure) } : {}),
+    ...(question.terrain ? { terrain: terrainExerciseSchema.parse(question.terrain) } : {}),
     ...(question.provenance
       ? { provenance: questionProvenanceSchema.parse(question.provenance) }
+      : {}),
+    ...(question.researchOrigin
+      ? { researchOrigin: questionResearchOriginSchema.parse(question.researchOrigin) }
+      : {}),
+    ...(question.researchSources
+      ? { researchSources: questionResearchSourcesSchema.parse(question.researchSources) }
       : {}),
     ...(question.choices
       ? { choices: question.choices.map((choice) => ({ id: choice.id, text: choice.text })) }

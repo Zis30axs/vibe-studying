@@ -1,5 +1,7 @@
+import { TerrainFigure } from './TerrainFigure'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
+  AnswerDraft,
   ExamCraftApi,
   GeneratedQuestionPreview,
   ModelConfig,
@@ -7,18 +9,30 @@ import type {
 } from '../shared/types'
 import { GeographyFigure } from './GeographyFigure'
 import './geography-generator.css'
+import { ModelConsentControl } from './ModelConsentControl'
+import { ModelRequestStatus } from './ModelRequestStatus'
 
 interface Props {
   api: ExamCraftApi
   config: ModelConfig | null
+  localContext?: { questionId: string; draft: AnswerDraft }
   onAccepted: (question: StudentQuestion) => void
   disabled?: boolean
+  visible?: boolean
 }
 
 /** The renderer receives only a student-safe preview. Accepting is a separate local write. */
-export function GeographyGenerator({ api, config, onAccepted, disabled = false }: Props) {
+export function GeographyGenerator({
+  api,
+  config,
+  localContext,
+  onAccepted,
+  disabled = false,
+  visible = true,
+}: Props) {
   const [syllabus, setSyllabus] = useState('高中地理')
   const [chapter, setChapter] = useState('地球运动与经纬度')
+  const [mode, setMode] = useState<'schematic' | 'terrain'>('schematic')
   const [difficulty, setDifficulty] = useState<'基础' | '进阶' | '挑战'>('基础')
   const [consent, setConsent] = useState(false)
   const [phase, setPhase] = useState<'idle' | 'generating' | 'accepting'>('idle')
@@ -76,6 +90,10 @@ export function GeographyGenerator({ api, config, onAccepted, disabled = false }
     setNotice('')
   }, [config?.revision, config?.configured, invalidate])
 
+  useEffect(() => {
+    if (!visible) invalidate()
+  }, [visible, invalidate])
+
   function changeInput(update: () => void) {
     invalidate()
     update()
@@ -104,14 +122,18 @@ export function GeographyGenerator({ api, config, onAccepted, disabled = false }
     setError('')
     setNotice('')
     try {
-      const result = await api.generateGeographyQuestion({
-        requestId,
-        syllabus: syllabus.trim(),
-        chapter: chapter.trim(),
-        difficulty,
-        cloudConsent: true,
-        configRevision,
-      })
+      const result = await api.generateGeographyQuestion(
+        {
+          requestId,
+          ...(mode === 'terrain' ? { mode } : {}),
+          syllabus: syllabus.trim(),
+          chapter: chapter.trim(),
+          difficulty,
+          cloudConsent: true,
+          configRevision,
+        },
+        localContext,
+      )
       if (!mounted.current || active.current !== requestId || revision.current !== configRevision) {
         void api.rejectGeneratedQuestion(result.token).catch(() => {})
         return
@@ -183,6 +205,18 @@ export function GeographyGenerator({ api, config, onAccepted, disabled = false }
         </p>
         <div className="geo-generator-fields">
           <label>
+            题目工具
+            <select
+              aria-label="地理出题工具"
+              value={mode}
+              disabled={busy || disabled}
+              onChange={(event) => changeInput(() => setMode(event.target.value as typeof mode))}
+            >
+              <option value="schematic">普通示意图</option>
+              <option value="terrain">模拟等高线 / 高差与坡度</option>
+            </select>
+          </label>
+          <label>
             课程 / 考纲
             <input
               aria-label="生成题目课程 / 考纲"
@@ -230,20 +264,23 @@ export function GeographyGenerator({ api, config, onAccepted, disabled = false }
               <p>
                 本次发送：课程 / 考纲“{syllabus || '未填写'}”、章节“{chapter || '未填写'}”、难度“
                 {difficulty}”，以及出题格式要求。
+                {mode === 'terrain' &&
+                  '本次使用模拟地形计算工具：模型选择有界参数，本地计算等高线、高差、距离、坡度并生成数值题干与解析；不是实测 DEM。'}
               </p>
               <p>
                 接收方：{config?.baseUrl || '尚未配置'} · {config?.protocol || '未设置协议'} ·{' '}
                 {config?.model || '未设置模型'}。调用可能产生 API 费用，按服务商计费。
               </p>
-              <label className="geo-generator-consent">
-                <input
-                  type="checkbox"
-                  checked={consent}
-                  disabled={busy || disabled || !config?.configured}
-                  onChange={(event) => setConsent(event.target.checked)}
-                />
-                我同意本次向上述模型发送这些输入并承担可能产生的 API 费用
-              </label>
+              <ModelConsentControl
+                api={api}
+                config={config}
+                scopes={['generation']}
+                checked={consent}
+                onChange={setConsent}
+                disabled={busy || disabled || !config?.configured}
+                label="我同意本次向上述模型发送这些输入并承担可能产生的 API 费用"
+              />
+              {phase === 'generating' && <ModelRequestStatus label="AI 出题" />}
             </div>
             <div className="geo-generator-actions">
               <button
@@ -291,6 +328,7 @@ export function GeographyGenerator({ api, config, onAccepted, disabled = false }
             </div>
             <p className="geo-generator-prompt">{preview.question.prompt}</p>
             {preview.question.figure && <GeographyFigure figure={preview.question.figure} />}
+            {preview.question.terrain && <TerrainFigure exercise={preview.question.terrain} />}
             <p className="geo-generator-provenance">
               {preview.question.source} · {preview.question.provenance?.model} ·{' '}
               {preview.question.provenance?.generatedAt}

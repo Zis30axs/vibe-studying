@@ -1,0 +1,67 @@
+.web-research-settings {
+  min-width: 0;
+}
+.web-research-settings p {
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.web-research-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0 8px;
+  font-size: 13px;
+}
+.web-research-field input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  padding: 11px;
+  color: var(--app-text);
+  background: var(--app-input);
+  font: inherit;
+}
+.web-research-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 14px 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.web-research-check input {
+  flex: 0 0 auto;
+  margin-top: 4px;
+  accent-color: var(--app-accent-solid);
+}
+.web-research-muted {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+.web-research-warning {
+  background: var(--app-warning-soft);
+  color: var(--app-warning-text);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.web-research-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+.web-research-actions button {
+  min-height: 38px;
+}
+.web-research-settings :focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 3px;
+}
+@media (max-width: 540px) {
+  .web-research-actions button {
+    width: 100%;
+  }
+}

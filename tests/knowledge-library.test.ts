@@ -1,7 +1,7 @@
 import { build } from 'esbuild'
 import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { extractKnowledgePdf, LocalKnowledgeLibrary } from '../src/adapters/knowledge-library'
 import {
@@ -17,7 +17,7 @@ beforeAll(async () => {
   temporary = await mkdtemp(join(tmpdir(), 'examcraft-knowledge-tests-'))
   // Keep the test bundle under the checkout so its external PDF.js resolves
   // installed dependencies. A separate smoke below tests isolated packaging.
-  workerPath = resolve('dist-electron/knowledge-pdf-worker-test.cjs')
+  workerPath = resolve(`dist-electron/knowledge-pdf-worker-test-${basename(temporary)}.cjs`)
   await build({
     entryPoints: ['src/adapters/knowledge-pdf-worker.ts'],
     outfile: workerPath,
@@ -417,4 +417,27 @@ describe('PDF failure, cancellation and storage boundaries', () => {
     await expect(store.getBytes(document.id)).rejects.toThrow('本地 PDF 数据')
     await expect(store.getBytes(document.id)).rejects.not.toThrow(home)
   })
+})
+
+describe('source integrity before cached text disclosure', () => {
+  it.each(['changed', 'missing'] as const)(
+    'rejects search and exact excerpts when source PDF is %s',
+    async (state) => {
+      const { home, store } = await library()
+      const result = await imported(store, ['Synthetic alpha lesson about practice.'])
+      const hits = await store.search({ documentId: result.document.id, query: 'alpha' })
+      expect(hits).toHaveLength(1)
+      const source = join(home, 'knowledge-library', result.document.id, 'source.pdf')
+      if (state === 'missing') await rm(source)
+      else {
+        const bytes = await readFile(source)
+        bytes[bytes.length - 1] ^= 1
+        await writeFile(source, bytes)
+      }
+      await expect(
+        store.search({ documentId: result.document.id, query: 'alpha' }),
+      ).rejects.toThrow()
+      await expect(store.resolveChunks([hits[0].chunkId])).rejects.toThrow()
+    },
+  )
 })

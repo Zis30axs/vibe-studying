@@ -1,0 +1,187 @@
+.learning-graph {
+  --provenance-independent: var(--app-success, #28694d);
+  --provenance-referenced: var(--app-warning-text, #77521e);
+  --provenance-adopted: var(--app-accent, #73508f);
+  --provenance-unknown: var(--app-text-muted, #6c6473);
+  padding: 16px;
+  border-top: 1px solid var(--app-border);
+  background: var(--app-surface);
+  color: var(--app-text);
+  font-size: 12px;
+  min-width: 0;
+}
+.learning-graph header,
+.learning-snapshot-top,
+.learning-snapshot-meta,
+.learning-help > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.learning-graph h2 {
+  font-size: 16px;
+  margin: 3px 0;
+}
+.learning-graph p {
+  line-height: 1.7;
+  margin: 8px 0;
+}
+.learning-graph-kicker {
+  letter-spacing: 0.12em;
+  font-size: 9px;
+  color: var(--app-accent);
+}
+.learning-graph-footnote,
+.learning-snapshot-meta,
+.learning-graph small {
+  color: var(--app-text-muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.learning-graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.assistance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid currentColor;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.assistance-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.assistance-independent {
+  --provenance-color: var(--app-success, #28694d);
+}
+.assistance-referenced-ai {
+  --provenance-color: var(--app-warning-text, #77521e);
+}
+.assistance-adopted-ai {
+  --provenance-color: var(--app-accent, #73508f);
+}
+.assistance-unknown {
+  --provenance-color: var(--app-text-muted, #6c6473);
+}
+.assistance-badge {
+  color: var(--provenance-color);
+  background: color-mix(in srgb, var(--provenance-color) 8%, var(--app-surface));
+}
+.learning-graph-filter {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0;
+}
+.learning-graph-mainline {
+  list-style: none;
+  padding: 0 0 0 15px;
+  margin: 12px 0 0 4px;
+  border-left: 2px solid var(--app-border);
+  max-height: 72vh;
+  overflow: auto;
+}
+.learning-snapshot {
+  position: relative;
+  padding: 12px;
+  margin: 0 0 12px;
+  border: 1px solid var(--app-border);
+  border-left: 3px solid var(--provenance-color);
+  border-radius: 8px;
+  background: var(--app-background);
+}
+.learning-snapshot::before {
+  content: '';
+  position: absolute;
+  left: -21px;
+  top: 16px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--provenance-color);
+  outline: 3px solid var(--app-surface);
+}
+.learning-snapshot details {
+  margin-top: 9px;
+  min-width: 0;
+}
+.learning-snapshot summary {
+  cursor: pointer;
+  color: var(--app-accent);
+  font-size: 11px;
+}
+.learning-snapshot button {
+  margin-top: 8px;
+}
+.learning-plain-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 300px;
+  overflow: auto;
+}
+.learning-help-branches {
+  list-style: none;
+  margin: 10px 0 0 8px;
+  padding: 0 0 0 14px;
+  border-left: 2px dashed var(--app-border);
+}
+.learning-help {
+  border: 1px solid var(--app-border);
+  border-radius: 7px;
+  padding: 9px;
+  margin-top: 8px;
+  background: var(--app-surface);
+}
+.learning-help > div > span {
+  color: var(--app-text-muted);
+  font-size: 10px;
+}
+.learning-help.help-received,
+.learning-help.help-rejected {
+  border-left: 3px solid var(--provenance-referenced);
+}
+.learning-help.help-merged {
+  border-left: 3px solid var(--provenance-adopted);
+}
+.learning-help.help-pending {
+  border-style: dashed;
+}
+.learning-help details ol {
+  padding-left: 20px;
+  line-height: 1.7;
+}
+.learning-graph button:focus-visible,
+.learning-graph summary:focus-visible,
+.learning-graph select:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 3px;
+}
+.submission-node[data-assistance] {
+  border-left: 3px solid var(--provenance-color);
+}
+
+.submission-node[data-assistance='independent'] {
+  --provenance-color: var(--app-success);
+}
+.submission-node[data-assistance='referenced-ai'] {
+  --provenance-color: var(--app-warning-text);
+}
+.submission-node[data-assistance='adopted-ai'] {
+  --provenance-color: var(--app-accent);
+}
+.submission-node[data-assistance='unknown'] {
+  --provenance-color: var(--app-text-muted);
+}

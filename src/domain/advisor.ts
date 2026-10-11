@@ -53,11 +53,16 @@ export function validateAdvisorResult(
   input: unknown,
   requestId: string,
   evidence: KnowledgeEvidence[],
+  onInvalid?: (paths: PropertyKey[][]) => void,
 ): AdvisorResult {
   const parsed = resultSchema.safeParse(input)
-  if (!parsed.success) throw new Error('顾问返回格式无效，请重新尝试。')
+  if (!parsed.success) {
+    onInvalid?.(parsed.error.issues.map((issue) => issue.path))
+    throw new Error('顾问返回格式无效，请重新尝试。')
+  }
   const { hint, citations = [], evidenceStatus } = parsed.data
   const fail = () => {
+    onInvalid?.([['citations'], ['evidenceStatus']])
     throw new Error('顾问教材引用无效，请重新尝试。')
   }
   if (new Set(citations.map((item) => item.chunkId)).size !== citations.length) fail()

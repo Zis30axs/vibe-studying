@@ -120,6 +120,9 @@ describe('DeepSeek main-process adapter with synthetic mocked HTTP only', () => 
     const fetcher = mock(json(completion()))
     const argument = {
       version: 1 as const,
+      groups: [
+        { id: 'group-synthetic', label: '第二小题（合成）', memberIds: ['cause', 'material'] },
+      ],
       roots: [
         {
           id: 'cause',
@@ -151,6 +154,7 @@ describe('DeepSeek main-process adapter with synthetic mocked HTTP only', () => 
     expect(JSON.stringify(data)).not.toContain('obsolete legacy content')
     expect(body.messages[0].content).toContain('只依据最终答案给分')
     expect(body.messages[0].content).toContain('argument 是结构参考')
+    expect(body.messages[0].content).toContain('不凭分组次序、ID 或数量推断第一/第二小题')
   })
 
   it('rejects an unsafe argument graph before attempting the provider request', async () => {

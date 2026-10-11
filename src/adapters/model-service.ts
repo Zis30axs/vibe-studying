@@ -3,7 +3,7 @@ import {
   generationRequestSchema,
   generatedQuestion,
   questionFingerprint,
-  GEOGRAPHY_GENERATION_PROMPT,
+  geographyGenerationPrompt,
 } from './question-generator'
 import { studentQuestionProjection } from '../domain/student-question'
 import { buildAdvisorContext, buildModuleAdvisorContext } from './review-contexts'
@@ -16,9 +16,16 @@ import {
 } from '../domain/advisor'
 import type { KnowledgeEvidence } from '../shared/knowledge'
 import { z } from 'zod'
-import { join } from 'node:path'
-import { AtomicJsonStore } from './atomic-json-store'
-import { ModelTransport, protocolSchema, validateBaseUrl } from './model-transport'
+import { ModelTransport } from './model-transport'
+import { ModelToolTransport } from './model-tool-transport'
+import {
+  ModelProfileStore,
+  modelMetadataSchema,
+  modelKeySchema,
+  type ModelSecretStorage,
+} from './model-profile-store'
+import { listRemoteModels, testModelConnection, ModelDiagnosticError } from './model-diagnostics'
+import { ModelDebugStore } from './model-debug'
 import { ModelAgent } from './model-agent'
 import type {
   Question,
@@ -29,6 +36,12 @@ import type {
   AdvisorResult,
   ModelConfig,
   ModelConfigInput,
+  ModelProfileInput,
+  ModelRoleInput,
+  ModelProfileDeleteInput,
+  ModelRole,
+  ModelDiagnosticInput,
+  ModelDiagnosticResult,
   ModuleReviewRequest,
   ModuleReviewResult,
 } from '../shared/types'
@@ -38,35 +51,76 @@ import {
   validateModuleReviewResult,
 } from '../domain/module-review'
 
-const storedSchema = z.strictObject({
-  protocol: protocolSchema,
-  baseUrl: z.string().transform(validateBaseUrl),
-  model: z
-    .string()
-    .trim()
-    .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/),
-  revision: z.number().int().nonnegative(),
-})
-const inputSchema = storedSchema
-  .omit({ revision: true })
-  .extend({
-    apiKey: z
-      .string()
-      .trim()
-      .max(4096)
-      .regex(/^[^\r\n]*$/)
-      .optional(),
-    clearApiKey: z.boolean().optional(),
-  })
-  .strict()
-/** Non-secret metadata on disk; keys live only in this process and are never returned. */
+/** Profiles and secrets stay in the main process; renderer receives metadata only. */
 export class ModelService {
-  private store: AtomicJsonStore<z.infer<typeof storedSchema>>
-  private key: string
-  private keyTarget: string | undefined
+  private profiles: ModelProfileStore
+  private debug = new ModelDebugStore()
+  private cancellationListeners = new Set<() => void>()
+  /** Trusted main-process clients only; never exposed through the renderer API. */
+  onCancelAll(listener: () => void): () => void {
+    this.cancellationListeners.add(listener)
+    return () => {
+      this.cancellationListeners.delete(listener)
+    }
+  }
+  async agentTransport(revision: number, role: ModelRole = 'parent') {
+    await this.queue
+    const { config, key } = await this.profiles.resolve(role, revision)
+    return {
+      config,
+      transport: new ModelToolTransport(
+        config,
+        key,
+        this.options.fetchImpl,
+        this.options.timeoutMs,
+        this.debug.record,
+      ),
+    }
+  }
+  async agentJson(
+    role: ModelRole,
+    revision: number,
+    system: string,
+    data: unknown,
+    signal: AbortSignal,
+  ): Promise<unknown> {
+    const { transport } = await this.snapshot(revision, role)
+    if (signal.aborted) throw new Error('Agent 任务已取消。')
+    const result = await transport.json(system, data, signal)
+    await this.queue
+    if (signal.aborted || (await this.profiles.getConfig(role)).revision !== revision)
+      throw new Error('任务已取消或模型配置已更改。')
+    return result
+  }
+  async agentReview(
+    revision: number,
+    question: Question,
+    draft: import('../shared/types').AnswerDraft,
+    signal: AbortSignal,
+  ) {
+    const { config, transport } = await this.snapshot(revision, 'parent')
+    if (signal.aborted) throw new Error('Agent 任务已取消。')
+    return new ModelAgent(`${config.protocol} · ${config.model}`, transport, signal).review(
+      question,
+      draft,
+    )
+  }
+  getModelDebug() {
+    return this.debug.getState()
+  }
+  setModelDebugEnabled(enabled: boolean) {
+    return this.debug.setEnabled(enabled)
+  }
+  clearModelDebug() {
+    return this.debug.clear()
+  }
+  modelDebugText() {
+    return this.debug.copyText()
+  }
   private pending = new Map<string, AbortController>()
   private generation: { id: string; controller: AbortController } | undefined
   private generationCount = 0
+  private gradingEpoch = 0
   private generatedPreviews = new Map<string, Question>()
   private accepting = new Set<string>()
   private deferredDiscards = new Set<string>()
@@ -75,6 +129,7 @@ export class ModelService {
   constructor(
     directory: string,
     private options: {
+      secureStorage?: ModelSecretStorage
       apiKey?: string
       model?: string
       fetchImpl?: typeof fetch
@@ -87,17 +142,7 @@ export class ModelService {
       ) => KnowledgeEvidence[] | Promise<KnowledgeEvidence[]>
     } = {},
   ) {
-    this.key = options.apiKey?.trim() ?? ''
-    this.keyTarget = this.key ? 'openai-chat|https://api.deepseek.com' : undefined
-    this.store = new AtomicJsonStore(join(directory, 'model-config.json'), storedSchema, () => ({
-      protocol: 'openai-chat',
-      baseUrl: 'https://api.deepseek.com',
-      model:
-        options.model && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(options.model)
-          ? options.model
-          : 'deepseek-flash',
-      revision: 0,
-    }))
+    this.profiles = new ModelProfileStore(directory, options)
   }
   private async resolveQuestion(id: string): Promise<Question> {
     try {
@@ -108,63 +153,139 @@ export class ModelService {
       throw new Error('题目不存在或不在允许范围内；未发送到模型服务。')
     }
   }
-  private target(config: { protocol: string; baseUrl: string }) {
-    return `${config.protocol}|${config.baseUrl}`
+  async getConfig(role: ModelRole = 'parent'): Promise<ModelConfig> {
+    await this.queue
+    return this.profiles.getConfig(role)
   }
-  async getConfig(): Promise<ModelConfig> {
-    const config = await this.store.load()
-    return { ...config, configured: Boolean(this.key) && this.keyTarget === this.target(config) }
+  async getProfiles() {
+    await this.queue
+    return this.profiles.getProfiles()
   }
-  saveConfig(input: ModelConfigInput): Promise<ModelConfig> {
+  private mutate<T>(operation: () => Promise<T>): Promise<T> {
     const work = this.queue.then(async () => {
-      let parsed: z.infer<typeof inputSchema>
-      try {
-        parsed = inputSchema.parse(input)
-      } catch {
-        throw new Error('模型设置无效，请检查协议、Base URL、模型名称和 API Key。')
-      }
-      const { apiKey, clearApiKey, ...metadata } = parsed
-      const previous = await this.store.load()
-      const next = await this.store.update((value) => ({
-        ...metadata,
-        revision: value.revision + 1,
-      }))
-      if (this.target(previous) !== this.target(next) || clearApiKey) {
-        this.key = ''
-        this.keyTarget = undefined
-      }
-      if (apiKey && !clearApiKey) {
-        this.key = apiKey
-        this.keyTarget = this.target(next)
-      }
+      const result = await operation()
       this.cancelAll()
-      // Configuration changes invalidate previews not already being explicitly saved.
       for (const token of this.generatedPreviews.keys())
         if (!this.accepting.has(token)) this.generatedPreviews.delete(token)
-      return this.getConfig()
+      return result
     })
     this.queue = work.catch(() => {})
     return work
   }
-  private async snapshot(revision: number) {
+  saveConfig(input: ModelConfigInput): Promise<ModelConfig> {
+    return this.mutate(() => this.profiles.saveConfig(input))
+  }
+  saveProfile(input: ModelProfileInput) {
+    return this.mutate(() => this.profiles.saveProfile(input))
+  }
+  assignProfiles(input: ModelRoleInput) {
+    return this.mutate(() => this.profiles.assignProfiles(input))
+  }
+  deleteProfile(input: ModelProfileDeleteInput) {
+    return this.mutate(() => this.profiles.deleteProfile(input))
+  }
+  private async snapshot(revision: number, role: ModelRole = 'parent') {
     await this.queue
-    const config = await this.getConfig()
-    if (revision !== config.revision) throw new Error('模型设置已更改，请重新确认本次发送。')
-    if (!config.configured)
-      throw new Error('请先在模型设置中填写 API Key；密钥仅在本次运行中有效。')
+    const { config, key } = await this.profiles.resolve(role, revision)
     return {
       config,
       transport: new ModelTransport(
         config,
-        this.key,
+        key,
         this.options.fetchImpl,
         this.options.timeoutMs,
+        this.debug.record,
       ),
     }
   }
   async reviewer(revision: number) {
+    const epoch = this.gradingEpoch
     const { config, transport } = await this.snapshot(revision)
-    return new ModelAgent(`${config.protocol} · ${config.model}`, transport)
+    const name = `${config.protocol} · ${config.model}`
+    return {
+      name,
+      review: async (...args: Parameters<ModelAgent['review']>) => {
+        const id = `grading:${randomUUID()}`
+        const controller = new AbortController()
+        this.pending.set(id, controller)
+        try {
+          await this.queue
+          if (
+            controller.signal.aborted ||
+            epoch !== this.gradingEpoch ||
+            (await this.profiles.getConfig()).revision !== revision
+          )
+            throw new Error('模型设置已更改，请重新确认本次发送。')
+          const result = await new ModelAgent(name, transport, controller.signal).review(...args)
+          await this.queue
+          if (
+            controller.signal.aborted ||
+            epoch !== this.gradingEpoch ||
+            (await this.profiles.getConfig()).revision !== revision
+          )
+            throw new Error('模型设置已更改；旧审阅结果未保存，请重新确认。')
+          return result
+        } finally {
+          this.pending.delete(id)
+        }
+      },
+    }
+  }
+  async diagnoseModel(input: ModelDiagnosticInput): Promise<ModelDiagnosticResult> {
+    let parsed: ModelDiagnosticInput
+    try {
+      parsed = modelMetadataSchema
+        .extend({
+          model: z.string().trim().max(120),
+          requestId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/),
+          expectedRevision: z.number().int().nonnegative(),
+          profileId: z
+            .string()
+            .regex(/^[A-Za-z0-9_-]{1,80}$/)
+            .optional(),
+          apiKey: modelKeySchema.optional(),
+          kind: z.enum(['list', 'test']),
+        })
+        .strict()
+        .parse(input)
+    } catch {
+      throw new Error('请检查协议、接口地址、模型名称和 API Key。')
+    }
+    const id = `diagnostic:${parsed.requestId}`
+    if ([...this.pending.keys()].some((key) => key.startsWith('diagnostic:')))
+      throw new Error('已有连接检查进行中，请等待或取消。')
+    const controller = new AbortController()
+    this.pending.set(id, controller)
+    try {
+      await this.queue
+      const key = await this.profiles.diagnosticKey(parsed)
+      if (controller.signal.aborted) throw new Error('请求已取消。')
+      const options = {
+        fetchImpl: this.options.fetchImpl,
+        timeoutMs: this.options.timeoutMs,
+        signal: controller.signal,
+      }
+      const result =
+        parsed.kind === 'list'
+          ? { models: await listRemoteModels(parsed, key, options) }
+          : await testModelConnection(parsed, key, options)
+      await this.queue
+      if (
+        controller.signal.aborted ||
+        (await this.profiles.getConfig()).revision !== parsed.expectedRevision
+      )
+        throw new Error('设置已更改，旧连接检查结果已丢弃。')
+      return result
+    } catch (error) {
+      if (error instanceof ModelDiagnosticError)
+        return { error: { code: error.code, message: error.message } }
+      throw error
+    } finally {
+      this.pending.delete(id)
+    }
+  }
+  cancelModelDiagnostic(id: string) {
+    if (typeof id === 'string') this.pending.get(`diagnostic:${id}`)?.abort()
   }
   async askAdvisor(input: AdvisorRequest): Promise<AdvisorResult> {
     let parsed: z.infer<typeof advisorRequestSchema>
@@ -178,7 +299,7 @@ export class ModelService {
     const controller = new AbortController()
     this.pending.set(parsed.requestId, controller)
     try {
-      const { transport } = await this.snapshot(parsed.configRevision)
+      const { transport } = await this.snapshot(parsed.configRevision, 'child')
       if (controller.signal.aborted) throw new Error('请求已取消。')
       const question = await this.resolveQuestion(parsed.questionId)
       if (controller.signal.aborted) throw new Error('请求已取消。')
@@ -202,12 +323,16 @@ export class ModelService {
       if ((await this.getConfig()).revision !== parsed.configRevision)
         throw new Error('模型设置已更改，请重新确认本次发送。')
       const data = buildAdvisorContext(question, parsed, evidence)
-      const raw = await transport.json(ADVISOR_PROMPT, data, controller.signal)
+      const context = transport.createDebugContext()
+      const started = Date.now()
+      const raw = await transport.json(ADVISOR_PROMPT, data, controller.signal, context)
       await this.queue
       if (controller.signal.aborted) throw new Error('请求已取消。')
       if ((await this.getConfig()).revision !== parsed.configRevision)
         throw new Error('模型设置已更改，请重新确认本次发送。')
-      return validateAdvisorResult(raw, parsed.requestId, evidence)
+      return validateAdvisorResult(raw, parsed.requestId, evidence, (paths) =>
+        transport.reportSchemaFailure(paths, Date.now() - started, context),
+      )
     } finally {
       this.pending.delete(parsed.requestId)
     }
@@ -221,20 +346,30 @@ export class ModelService {
     const controller = new AbortController()
     this.pending.set(pendingId, controller)
     try {
-      const { transport } = await this.snapshot(parsed.configRevision)
+      const { transport } = await this.snapshot(parsed.configRevision, 'child')
       if (controller.signal.aborted) throw new Error('请求已取消。')
       const question = await this.resolveQuestion(parsed.questionId)
       if (question.subject === 'math') throw new Error('该题不支持文科模块检查。')
       if (controller.signal.aborted) throw new Error('请求已取消。')
       const data = buildModuleAdvisorContext(question, parsed)
-      const raw = await transport.json(MODULE_REVIEW_PROMPT, data, controller.signal)
+      await this.queue
+      if (
+        controller.signal.aborted ||
+        (await this.profiles.getConfig()).revision !== parsed.configRevision
+      )
+        throw new Error('模型设置已更改，请重新确认本次发送。')
+      const context = transport.createDebugContext()
+      const started = Date.now()
+      const raw = await transport.json(MODULE_REVIEW_PROMPT, data, controller.signal, context)
       // A non-cooperative transport or configuration write must never deliver stale edits.
       await this.queue
       const config = await this.getConfig()
       if (controller.signal.aborted) throw new Error('请求已取消。')
       if (config.revision !== parsed.configRevision)
         throw new Error('模型设置已更改，请重新确认本次发送。')
-      return validateModuleReviewResult(raw, parsed)
+      return validateModuleReviewResult(raw, parsed, (paths) =>
+        transport.reportSchemaFailure(paths, Date.now() - started, context),
+      )
     } finally {
       this.pending.delete(pendingId)
     }
@@ -260,20 +395,26 @@ export class ModelService {
       if (controller.signal.aborted) throw new Error('请求已取消。')
       // Charge the session quota exactly once at dispatch, including failed/cancelled requests.
       this.generationCount += 1
+      const context = transport.createDebugContext()
+      const started = Date.now()
       const raw = await transport.json(
-        GEOGRAPHY_GENERATION_PROMPT,
+        geographyGenerationPrompt(parsed),
         {
           syllabus: parsed.syllabus,
           chapter: parsed.chapter,
           difficulty: parsed.difficulty,
+          ...(parsed.mode === 'terrain' ? { mode: 'terrain' } : {}),
         },
         controller.signal,
+        context,
       )
       await this.queue
       if (controller.signal.aborted) throw new Error('请求已取消。')
       if ((await this.getConfig()).revision !== parsed.configRevision)
         throw new Error('模型设置已更改，请重新确认本次发送。')
-      const question = generatedQuestion(raw, parsed, config)
+      const question = generatedQuestion(raw, parsed, config, (paths) =>
+        transport.reportSchemaFailure(paths, Date.now() - started, context),
+      )
       const bank = await this.options.listQuestions()
       if (controller.signal.aborted) throw new Error('请求已取消。')
       const fingerprint = questionFingerprint(question)
@@ -334,8 +475,20 @@ export class ModelService {
   cancelAdvisor(id: string): void {
     if (typeof id === 'string') this.pending.get(id)?.abort()
   }
+  cancelGrading(): void {
+    this.gradingEpoch += 1
+    for (const [id, controller] of this.pending) if (id.startsWith('grading:')) controller.abort()
+  }
   cancelAll(): void {
+    this.gradingEpoch += 1
     this.generation?.controller.abort()
     for (const controller of this.pending.values()) controller.abort()
+    for (const listener of this.cancellationListeners) {
+      try {
+        listener()
+      } catch {
+        /* One observer must not block other cancellations. */
+      }
+    }
   }
 }

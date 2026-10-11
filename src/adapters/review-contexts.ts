@@ -1,3 +1,5 @@
+import { terrainExerciseSchema, terrainExerciseEvidence } from '../domain/terrain-exercise'
+import type { TerrainExercise } from '../shared/terrain'
 import { geographyFigureSchema } from '../domain/geography-figure'
 import type { KnowledgeEvidence } from '../shared/knowledge'
 import type {
@@ -14,6 +16,8 @@ import type {
 /** These payloads are built only in the trusted process. No conversation/state object is accepted. */
 export interface AdvisorQuestionContext {
   figure?: GeographyFigure
+  terrain?: TerrainExercise
+  terrainEvidence?: ReturnType<typeof terrainExerciseEvidence>
   subject: Subject
   prompt: string
   choices?: { id: string; text: string }[]
@@ -34,6 +38,7 @@ export interface ModuleAdvisorContext {
   scope: ModuleReviewRequest['scope']
   question: AdvisorQuestionContext
   roots: ArgumentNode[]
+  groups?: ModuleReviewRequest['groups']
   selectedSpans?: ModuleReviewRequest['selectedSpans']
 }
 export type Immutable<T> = T extends object ? { readonly [K in keyof T]: Immutable<T[K]> } : T
@@ -52,12 +57,16 @@ function advisorQuestion(question: Question, includeReference: boolean): Advisor
     subject: question.subject,
     prompt: question.prompt,
     ...(question.figure ? { figure: geographyFigureSchema.parse(question.figure) } : {}),
+    ...(question.terrain ? { terrain: terrainExerciseSchema.parse(question.terrain) } : {}),
     ...(question.choices
       ? { choices: question.choices.map(({ id, text }) => ({ id, text })) }
       : {}),
     ...(includeReference
       ? {
           reference: question.explanation,
+          ...(question.terrain
+            ? { terrainEvidence: terrainExerciseEvidence(question.terrain) }
+            : {}),
           ...(question.correctAnswer ? { correctAnswer: question.correctAnswer } : {}),
           ...(question.rubric
             ? {
@@ -113,6 +122,16 @@ export function buildModuleAdvisorContext(
     scope: request.scope,
     question: advisorQuestion(question, request.includeReference),
     roots: nodes(request.roots),
+    ...(request.groups
+      ? {
+          groups: request.groups.map(({ id, label, memberIds, partial }) => ({
+            id,
+            label,
+            memberIds: [...memberIds],
+            partial,
+          })),
+        }
+      : {}),
     ...(request.selectedSpans
       ? {
           selectedSpans: request.selectedSpans.map(({ moduleId, start, end, expectedText }) => ({
@@ -134,6 +153,12 @@ export function buildGradingContext(question: Question, draft: AnswerDraft, syll
       title: question.title,
       prompt: question.prompt,
       ...(question.figure ? { figure: geographyFigureSchema.parse(question.figure) } : {}),
+      ...(question.terrain
+        ? {
+            terrain: terrainExerciseSchema.parse(question.terrain),
+            terrainEvidence: terrainExerciseEvidence(question.terrain),
+          }
+        : {}),
       source: question.source,
       tags: [...question.tags],
       reference: question.explanation,
@@ -153,7 +178,21 @@ export function buildGradingContext(question: Question, draft: AnswerDraft, syll
       choiceId: draft.choiceId,
       text: draft.text,
       ...(draft.argument
-        ? { argument: { version: draft.argument.version, roots: nodes(draft.argument.roots) } }
+        ? {
+            argument: {
+              version: draft.argument.version,
+              roots: nodes(draft.argument.roots),
+              ...(draft.argument.groups
+                ? {
+                    groups: draft.argument.groups.map(({ id, label, memberIds }) => ({
+                      id,
+                      label,
+                      memberIds: [...memberIds],
+                    })),
+                  }
+                : {}),
+            },
+          }
         : { blocks: draft.blocks.map(({ category, label, text }) => ({ category, label, text })) }),
       drawing: {
         mode: draft.drawing.mode,

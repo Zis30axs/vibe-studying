@@ -1,3 +1,4 @@
+import { compileTerrainExercise, TERRAIN_GENERATION_PROMPT } from '../domain/terrain-exercise'
 import { createHash, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { geographyFigureSchema } from '../domain/geography-figure'
@@ -5,6 +6,7 @@ import { questionSchema } from '../domain/schemas'
 import type { GenerateGeographyRequest, ModelConfig, Question } from '../shared/types'
 
 export const generationRequestSchema = z.strictObject({
+  mode: z.enum(['schematic', 'terrain']).optional(),
   requestId: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/),
   syllabus: z.string().trim().min(1).max(500),
   chapter: z.string().trim().min(1).max(120),
@@ -37,15 +39,20 @@ export function generatedQuestion(
   raw: unknown,
   request: GenerateGeographyRequest,
   config: ModelConfig,
+  onInvalid?: (paths: PropertyKey[][]) => void,
 ): Question {
   try {
-    const parsed = generatedSchema.parse(raw)
+    const parsed =
+      request.mode === 'terrain' ? compileTerrainExercise(raw) : generatedSchema.parse(raw)
     return questionSchema.parse({
       ...parsed,
       id: `geo-ai-${randomUUID()}`,
       subject: 'geography',
       kind: 'geography',
-      source: 'AI 生成练习 · 未经事实核验',
+      source:
+        request.mode === 'terrain'
+          ? '模拟教学地形 · 本地数值计算 · AI 选择参数'
+          : 'AI 生成练习 · 未经事实核验',
       tags: [request.chapter, request.difficulty],
       rubric: parsed.rubric.map((item, index) => ({ ...item, id: `rubric-${index + 1}` })),
       provenance: {
@@ -56,7 +63,8 @@ export function generatedQuestion(
         verified: false,
       },
     })
-  } catch {
+  } catch (error) {
+    onInvalid?.(error instanceof z.ZodError ? error.issues.map((issue) => issue.path) : [[]])
     throw new Error('生成题目或图形格式无效，未保存；请手动重试。')
   }
 }
@@ -65,4 +73,8 @@ export function questionFingerprint(question: Pick<Question, 'prompt'>): string 
   return createHash('sha256')
     .update(question.prompt.normalize('NFKC').replace(/\s+/gu, '').toLocaleLowerCase())
     .digest('hex')
+}
+
+export function geographyGenerationPrompt(request: GenerateGeographyRequest): string {
+  return request.mode === 'terrain' ? TERRAIN_GENERATION_PROMPT : GEOGRAPHY_GENERATION_PROMPT
 }

@@ -1,6 +1,6 @@
 {
   "name": "examcraft",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "An offline-first subject IDE for deliberate exam practice",
   "private": true,
   "license": "GPL-3.0-only",
@@ -21,7 +21,8 @@
     "check": "npm run typecheck && npm test && npm run build",
     "mcp": "node dist-mcp/server.cjs",
     "package:win": "npm run build && node scripts/package-windows.mjs",
-    "test:packaged": "node scripts/smoke-packaged.mjs"
+    "test:packaged": "node scripts/smoke-packaged.mjs",
+    "test:browser": "playwright test --config playwright.browser.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",

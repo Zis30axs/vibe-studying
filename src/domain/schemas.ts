@@ -1,9 +1,18 @@
+import { submissionAssistanceSchema } from '../shared/learning-graph'
+import { terrainExerciseSchema } from './terrain-exercise'
+import { assertArgumentGroups } from './argument-groups'
 import { geographyFigureSchema, questionProvenanceSchema } from './geography-figure'
 import { z } from 'zod'
 import { studentQuestionSchema } from './student-question'
 import { parseExpression } from './math'
+import { isValidSnapStep } from './math-canvas'
 import { assertArgumentRevisions, MAX_ARGUMENT_REVISIONS } from './argument-revisions'
 import { subjects } from '../shared/subjects'
+import {
+  questionResearchOriginSchema,
+  questionResearchSourcesSchema,
+  validQuestionResearch,
+} from '../shared/question-research'
 import type {
   AnswerDraft,
   ArgumentDocument,
@@ -58,7 +67,10 @@ export const questionSchema = z
     maxScore: z.number().int().min(1).max(100),
     explanation: z.string().trim().min(1).max(20000),
     figure: geographyFigureSchema.optional(),
+    terrain: terrainExerciseSchema.optional(),
     provenance: questionProvenanceSchema.optional(),
+    researchOrigin: questionResearchOriginSchema.optional(),
+    researchSources: questionResearchSourcesSchema.optional(),
     choices: z
       .array(z.strictObject({ id: idSchema, text: z.string().trim().min(1).max(5000) }))
       .min(2)
@@ -70,7 +82,10 @@ export const questionSchema = z
   })
   .superRefine((question, ctx) => {
     const fail = (message: string) => ctx.addIssue({ code: 'custom', message })
-    if (question.figure && question.subject !== 'geography') fail('示意图只适用于地理题')
+    if (!validQuestionResearch(question)) fail('题目来源标识与来源记录不一致')
+    if ((question.figure || question.terrain) && question.subject !== 'geography')
+      fail('示意图只适用于地理题')
+    if (question.figure && question.terrain) fail('题目不能同时包含普通示意图与模拟地形')
     if (!uniqueIds(question.choices) || !uniqueIds(question.blocks) || !uniqueIds(question.rubric))
       fail('选项、模块和评分项的标识符必须各自唯一')
     if (question.kind === 'choice') {
@@ -97,6 +112,16 @@ export const questionBankSchema = z
 export const drawingSchema = z
   .strictObject({
     mode: z.enum(['cartesian', 'geographic']),
+    map: z
+      .strictObject({
+        layer: z.enum(['outline', 'terrain', 'admin1']),
+        longitude: z.number().finite().min(-180).max(180),
+        latitude: z.number().finite().min(-90).max(90),
+        zoom: z.number().finite().min(1).max(8),
+        showGrid: z.boolean(),
+        showLabels: z.boolean().optional(),
+      })
+      .optional(),
     points: z
       .array(
         z.strictObject({
@@ -142,13 +167,22 @@ export const mathWorkbenchSchema = z
         } catch {
           return false
         }
-      }, '函数表达式无效，请使用支持的符号和显式乘号 *'),
+      }, '函数表达式无效，请核对函数名、括号和乘除范围'),
     parameters: z.strictObject({
       a: z.number().finite().min(-10).max(10),
       b: z.number().finite().min(-10).max(10),
       c: z.number().finite().min(-10).max(10),
     }),
     measurement: z.array(idSchema).max(3),
+    snapStep: z
+      .number()
+      .refine(isValidSnapStep, '吸附步长须为 0.01 到 10，最多 6 位小数')
+      .optional(),
+    showProjections: z.boolean().optional(),
+    projectionColor: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/, '投影颜色须为六位十六进制色值')
+      .optional(),
   })
   .superRefine((math, ctx) => {
     const ids = new Set(math.drawing.points.map((point) => point.id))
@@ -172,7 +206,13 @@ function boundedArgumentNodeSchema(depth: number): z.ZodType<ArgumentNode> {
         : z.array(boundedArgumentNodeSchema(depth + 1)).max(MAX_ARGUMENT_NODES),
   })
 }
+const argumentGroupSchema = z.strictObject({
+  id: idSchema,
+  label: z.string().max(120),
+  memberIds: z.array(idSchema).min(2).max(MAX_ARGUMENT_NODES),
+})
 const argumentSnapshotWireSchema = z.strictObject({
+  groups: z.array(argumentGroupSchema).max(40).optional(),
   roots: z.array(boundedArgumentNodeSchema(1)).max(MAX_ARGUMENT_NODES),
   canvas: z
     .strictObject({
@@ -222,6 +262,7 @@ export const argumentSchema = z.preprocess((input, ctx) => {
     if (!input || typeof input !== 'object' || Array.isArray(input))
       throw new Error('论证结构格式无效')
     assertArgumentRoots((input as Record<string, unknown>).roots)
+    assertArgumentGroups((input as ArgumentDocument).groups, (input as ArgumentDocument).roots)
     const revisions = (input as Record<string, unknown>).revisions
     if (revisions !== undefined) assertArgumentRevisions(revisions)
     // Zod records omit __proto__ while parsing. Reject dangerous raw keys before
@@ -297,6 +338,7 @@ export const attemptSchema = z
     id: idSchema,
     questionId: idSchema,
     questionSnapshot: studentQuestionSchema.optional(),
+    assistance: submissionAssistanceSchema.optional(),
     submittedAt: z.iso.datetime(),
     draft: draftSchema,
   })

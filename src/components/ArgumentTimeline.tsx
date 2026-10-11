@@ -35,7 +35,9 @@ export function ArgumentTimeline({
       <summary>
         版本时间树 · {nodes.length}/40 个检查点{dirty ? ' · 有未记录修改' : ''}
       </summary>
-      <p>仅记录模块及布局；最终正文不受恢复影响。恢复旧版本后，新检查点会从它分支，原分支保留。</p>
+      <p>
+        记录模块、大模块分组及布局；最终正文不受恢复影响。恢复旧版本后，新检查点会从它分支，原分支保留。
+      </p>
       <form
         onSubmit={(event) => {
           event.preventDefault()

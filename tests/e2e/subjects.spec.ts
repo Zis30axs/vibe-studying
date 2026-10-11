@@ -92,7 +92,11 @@ for (const item of [
     await expect(page.locator('.history-item')).toHaveCount(1)
     await page.locator('.history-item').click()
     await page.getByText(/查看本次提交的答案/).click()
-    await expect(page.getByText(item.text, { exact: true })).toBeVisible()
+    await expect(
+      page
+        .getByRole('region', { name: '审阅结果', exact: true })
+        .getByText(item.text, { exact: true }),
+    ).toBeVisible()
     await expect(page.getByRole('alert')).toHaveCount(0)
   })
 }

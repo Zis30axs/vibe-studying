@@ -1,5 +1,7 @@
+import { reviewArgumentGroups } from '../domain/argument-groups'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  AnswerDraft,
   ArgumentDocument,
   ArgumentNode,
   ExamCraftApi,
@@ -9,16 +11,23 @@ import type {
   StudentQuestion,
 } from '../shared/types'
 import './module-review.css'
+import { ModelConsentControl } from './ModelConsentControl'
+import { ModelRequestStatus } from './ModelRequestStatus'
 
 export interface ModuleReviewPanelProps {
   document: ArgumentDocument
+  draft?: AnswerDraft
   disabled?: boolean
+  active?: boolean
   question: StudentQuestion
   config: ModelConfig | null
   api: ExamCraftApi
   selectedNodeId?: string | null
   onSelect: (nodeId: string, span?: { start: number; end: number }) => void
-  onApply: (suggestion: ModuleReviewSuggestion) => { ok: boolean; message?: string }
+  onApply: (
+    suggestion: ModuleReviewSuggestion,
+    persistedDraft?: AnswerDraft,
+  ) => { ok: boolean; message?: string }
 }
 const labels: Record<ArgumentNode['kind'], string> = {
   principle: '观点 / 原理',
@@ -40,7 +49,9 @@ const priorityLabels = { 'must-fix': '优先修正', optional: '可选改进', u
 /** Review is an explicit cloud operation. It never owns or writes the final answer. */
 export function ModuleReviewPanel({
   document: argument,
-  disabled = false,
+  draft,
+  disabled: disabledProp = false,
+  active: isActive = true,
   question,
   config,
   api,
@@ -48,6 +59,7 @@ export function ModuleReviewPanel({
   onSelect,
   onApply,
 }: ModuleReviewPanelProps) {
+  const disabled = disabledProp || !isActive
   const [open, setOpen] = useState(false)
   const [scope, setScope] = useState<'selected' | 'all'>('selected')
   const [checked, setChecked] = useState<string[]>([])
@@ -65,6 +77,15 @@ export function ModuleReviewPanel({
   const [error, setError] = useState('')
   const [decisions, setDecisions] = useState<Record<string, 'accepted' | 'rejected'>>({})
   const active = useRef<string | null>(null)
+  const mounted = useRef(true)
+  const currentDraftKey = useRef(JSON.stringify(draft))
+  currentDraftKey.current = JSON.stringify(draft)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
   const toolbar = useRef<HTMLButtonElement>(null)
   const closeButton = useRef<HTMLButtonElement>(null)
   const sourceKey = JSON.stringify({
@@ -75,6 +96,7 @@ export function ModuleReviewPanel({
       choices: question.choices,
     },
     roots: argument.roots,
+    groups: argument.groups,
   })
   const configKey = JSON.stringify(config)
   const currentSource = useRef(sourceKey)
@@ -83,6 +105,7 @@ export function ModuleReviewPanel({
   currentConfig.current = configKey
   const nodes = useMemo(() => flatten(argument.roots), [argument.roots])
   const roots = scope === 'all' ? argument.roots : pickRoots(argument.roots, checked)
+  const groups = reviewArgumentGroups(argument, roots)
   const included = flatten(roots)
   const single = included.length === 1 ? included[0] : null
   const cancel = useCallback(() => {
@@ -160,16 +183,20 @@ export function ModuleReviewPanel({
     setError('')
     setStale(false)
     try {
-      const response = await api.reviewModules({
-        requestId,
-        cloudConsent: true,
-        configRevision: config.revision,
-        scope,
-        questionId: question.id,
-        includeReference,
-        roots,
-        ...(span ? { selectedSpans: [span] } : {}),
-      })
+      const response = await api.reviewModules(
+        {
+          requestId,
+          cloudConsent: true,
+          configRevision: config.revision,
+          scope,
+          questionId: question.id,
+          includeReference,
+          roots,
+          ...(groups.length ? { groups } : {}),
+          ...(span ? { selectedSpans: [span] } : {}),
+        },
+        draft,
+      )
       if (
         active.current !== requestId ||
         currentSource.current !== source ||
@@ -234,14 +261,44 @@ export function ModuleReviewPanel({
       }
     }
   }
-  function accept(suggestion: ModuleReviewSuggestion) {
+  async function accept(suggestion: ModuleReviewSuggestion) {
     const node = nodes.find((node) => node.id === suggestion.moduleId)
     if (disabled || stale || !suggestion.edit || node?.text !== suggestion.edit.baseText) {
       setStale(true)
       setError('模块已变化，请重新检查。')
       return
     }
-    const applied = onApply(suggestion)
+    const acceptanceSource = currentSource.current
+    const acceptanceDraft = currentDraftKey.current
+    let persisted: AnswerDraft | undefined
+    try {
+      if (api.acceptModuleSuggestion && draft && result) {
+        setBusy(true)
+        persisted = await api.acceptModuleSuggestion({
+          requestId: result.requestId,
+          suggestionId: suggestion.id,
+          expectedDraft: draft,
+        })
+      }
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : '修改未保存，请重新检查模块')
+      setStale(true)
+      return
+    } finally {
+      setBusy(false)
+    }
+    if (
+      !mounted.current ||
+      currentSource.current !== acceptanceSource ||
+      currentDraftKey.current !== acceptanceDraft
+    ) {
+      if (mounted.current) {
+        setStale(true)
+        setError('本次修改已处理；你随后编辑的内容已保留，请重新检查当前版本。')
+      }
+      return
+    }
+    const applied = onApply(suggestion, persisted)
     if (applied.ok) {
       setDecisions((previous) => ({ ...previous, [suggestion.id]: 'accepted' }))
       setStale(true)
@@ -348,6 +405,24 @@ export function ModuleReviewPanel({
                 {option.id}. {option.text}
               </p>
             ))}
+            {groups.map((group) => (
+              <div key={group.id}>
+                <p>
+                  大模块：{group.label || '未命名'} · 本次 {group.memberIds.length} 个成员
+                  {group.partial ? '（仅部分成员，不代表完整作答）' : ''}
+                </p>
+                <ol>
+                  {group.memberIds.map((memberId) => {
+                    const node = included.find((node) => node.id === memberId)!
+                    return (
+                      <li key={memberId}>
+                        {labels[node.kind]} · {node.text.slice(0, 80) || '空模块'}
+                      </li>
+                    )
+                  })}
+                </ol>
+              </div>
+            ))}
             {included.map((node) => (
               <div key={node.id}>
                 <strong>{labels[node.kind]}</strong>
@@ -418,20 +493,18 @@ export function ModuleReviewPanel({
             <dd>{config ? `${config.protocol} / ${config.model}` : '请先配置模型'}</dd>
           </dl>
           <p className="module-review-muted">
-            发送上方必要题目信息、所选模块的编号、类型、文字、层级，以及片段范围和检查指令。勾选参考授权时，另附本题解析和评分依据。密钥仅用于该服务商鉴权；不发送成文答案或其他顾问对话。
+            发送上方必要题目信息、所选模块的编号、类型、文字、层级、大模块成员关系与显式标签，以及片段范围和检查指令。勾选参考授权时，另附本题解析和评分依据。密钥仅用于该服务商鉴权；不发送画布位置、版本历史、成文答案或其他顾问对话。
           </p>
-          <label className="module-review-consent">
-            <input
-              type="checkbox"
-              checked={consent}
-              disabled={disabled || busy || !config?.configured || !included.length}
-              onChange={(event) => setConsent(event.target.checked)}
-            />
-            我同意将上述检查内容（所选模块、必要题目信息
-            {includeReference ? '、本题解析和评分依据' : ''}
-            ）发送到此顾问接口与模型，可能产生服务商费用。
-          </label>
-          {!config?.configured && <p role="status">请先在模型设置中配置接口与本次会话的密钥。</p>}
+          <ModelConsentControl
+            api={api}
+            config={config}
+            scopes={includeReference ? ['modules', 'reference'] : ['modules']}
+            checked={consent}
+            onChange={setConsent}
+            disabled={disabled || busy || !config?.configured || !included.length}
+            label={`我同意将上述检查内容（所选模块、必要题目信息${includeReference ? '，以及本题参考解析和评分依据' : ''}）发送给 ${config?.baseUrl ?? '所选服务商'}，可能产生 API 费用。`}
+          />
+          {busy && <ModelRequestStatus label="AI 模块审查" />}
           <div className="module-review-actions">
             <button
               type="button"
@@ -540,10 +613,14 @@ export function ModuleReviewPanel({
                               type="button"
                               disabled={disabled || stale || busy}
                               onClick={() =>
-                                setDecisions((previous) => ({
-                                  ...previous,
-                                  [suggestion.id]: 'rejected',
-                                }))
+                                setDecisions((previous) => {
+                                  const next = { ...previous, [suggestion.id]: 'rejected' as const }
+                                  if (
+                                    result.suggestions.every((item) => next[item.id] === 'rejected')
+                                  )
+                                    void api.rejectLearningHelp?.(result.requestId).catch(() => {})
+                                  return next
+                                })
                               }
                             >
                               拒绝此建议

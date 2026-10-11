@@ -28,6 +28,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+      - if: runner.os == 'Linux'
+        run: npm run test:browser
       # No grep/filter: math, humanities, heatmap and all existing desktop tests run.
       - if: runner.os == 'Windows'
         run: npm run test:e2e

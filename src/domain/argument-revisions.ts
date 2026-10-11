@@ -1,3 +1,4 @@
+import { assertArgumentGroups } from './argument-groups'
 import type { ArgumentDocument, ArgumentRevisions, ArgumentSnapshot } from '../shared/types'
 import { argumentCanvas, assertArgumentRoots } from './argument'
 
@@ -36,10 +37,13 @@ export function assertArgumentRevisions(value: unknown): asserts value is Argume
       !node.snapshot ||
       typeof node.snapshot !== 'object' ||
       Array.isArray(node.snapshot) ||
-      Object.keys(node.snapshot).some((key) => key !== 'roots' && key !== 'canvas')
+      Object.keys(node.snapshot).some(
+        (key) => key !== 'roots' && key !== 'canvas' && key !== 'groups',
+      )
     )
       throw new Error('版本快照格式无效')
     assertArgumentRoots(node.snapshot.roots)
+    assertArgumentGroups(node.snapshot.groups, node.snapshot.roots)
     nodes.set(node.id, node)
   }
   if (!validId(timeline.headId) || !nodes.has(timeline.headId)) throw new Error('当前版本不存在')
@@ -65,7 +69,12 @@ export function assertArgumentRevisions(value: unknown): asserts value is Argume
 
 function snapshot(document: ArgumentDocument): ArgumentSnapshot {
   assertArgumentRoots(document.roots)
-  return { roots: structuredClone(document.roots), canvas: argumentCanvas(document) }
+  assertArgumentGroups(document.groups, document.roots)
+  return {
+    roots: structuredClone(document.roots),
+    canvas: argumentCanvas(document),
+    ...(document.groups ? { groups: structuredClone(document.groups) } : {}),
+  }
 }
 
 /** Pure explicit commit. Refuse at limits rather than deleting branches or current ancestry. */

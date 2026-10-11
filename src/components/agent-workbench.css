@@ -1,0 +1,329 @@
+.agent-workbench {
+  min-width: 0;
+  color: var(--app-text);
+}
+.agent-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+.agent-header h2 {
+  margin: 5px 0 10px;
+}
+.agent-header p {
+  color: var(--app-muted);
+  max-width: 60em;
+}
+.agent-local-badge {
+  border: 1px solid var(--app-border);
+  border-radius: 20px;
+  padding: 7px 12px;
+  white-space: nowrap;
+  font-size: 12px;
+  background: var(--app-surface);
+}
+.agent-layout {
+  display: grid;
+  grid-template-columns: minmax(270px, 0.95fr) minmax(300px, 1.05fr);
+  gap: 20px;
+  align-items: start;
+}
+.agent-scope,
+.agent-execution {
+  min-width: 0;
+  border: 1px solid var(--app-border);
+  border-radius: 16px;
+  padding: 22px;
+  background: var(--app-surface);
+}
+.agent-workbench h3 {
+  font-size: 16px;
+  margin: 0 0 14px;
+}
+.agent-workbench h3:not(:first-child) {
+  margin-top: 24px;
+}
+.agent-workbench p {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.agent-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 7px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.agent-field textarea,
+.agent-field select,
+.agent-field input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--app-text);
+  background: var(--app-input);
+  font: inherit;
+}
+.agent-field textarea {
+  resize: vertical;
+  min-height: 110px;
+}
+.agent-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.agent-check,
+.agent-tool {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 12px 0;
+}
+.agent-check input,
+.agent-tool input {
+  flex: 0 0 auto;
+  margin-top: 3px;
+  accent-color: var(--app-accent-solid);
+}
+.agent-tool {
+  border: 1px solid var(--app-border);
+  border-radius: 9px;
+  padding: 10px;
+  margin: 0;
+}
+.agent-tool small {
+  display: block;
+  font-size: 12px;
+  color: var(--app-muted);
+  margin-top: 3px;
+}
+.agent-tools {
+  display: grid;
+  gap: 8px;
+}
+.agent-muted {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+.agent-scope-summary,
+.agent-knowledge {
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--app-surface-muted);
+  font-size: 13px;
+}
+.agent-scope-summary p {
+  margin-bottom: 0;
+}
+.agent-knowledge {
+  margin-top: 16px;
+}
+.agent-workbench summary {
+  cursor: pointer;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.agent-budget {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  margin: 18px 0;
+}
+.agent-budget span {
+  border: 1px solid var(--app-border);
+  padding: 6px 9px;
+  border-radius: 7px;
+  background: var(--app-surface-muted);
+}
+.agent-warning {
+  background: var(--app-warning-soft);
+  color: var(--app-warning-text);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.agent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+.agent-actions button {
+  min-height: 38px;
+}
+.agent-notice {
+  padding: 12px;
+  background: var(--app-accent-soft);
+  color: var(--app-text);
+  border-radius: 8px;
+}
+.agent-run {
+  border-top: 1px solid var(--app-border);
+  padding-top: 20px;
+  margin-top: 22px;
+}
+.agent-events {
+  list-style: none;
+  padding: 0;
+  font-size: 12px;
+}
+.agent-events li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--app-border);
+}
+.agent-events li span:last-child {
+  color: var(--app-muted);
+  flex-shrink: 0;
+}
+.agent-plain-text,
+.agent-workbench pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.agent-workbench pre {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.65;
+  padding: 12px;
+  background: var(--app-surface-muted);
+  border-radius: 8px;
+  max-height: 440px;
+  overflow: auto;
+}
+.agent-output {
+  margin-top: 20px;
+}
+.agent-proposal {
+  margin-top: 20px;
+  border: 1px solid var(--app-border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.agent-proposal h4 {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.agent-answer-diff {
+  display: grid;
+  gap: 10px;
+}
+.agent-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--app-muted);
+  background: var(--app-surface-muted);
+  border-radius: 10px;
+  font-size: 13px;
+}
+.agent-workbench :focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 3px;
+}
+@media (max-width: 1080px) {
+  .agent-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 540px) {
+  .agent-header {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .agent-scope,
+  .agent-execution {
+    padding: 15px;
+  }
+  .agent-field-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .agent-events li {
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .agent-actions button {
+    width: 100%;
+  }
+}
+
+.agent-tool-name {
+  display: block;
+  margin-top: 4px;
+  color: var(--app-muted);
+  font-size: 11px;
+}
+.agent-web-scope {
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 10px;
+  background: var(--app-surface-muted);
+}
+.agent-query-preview {
+  font-size: 13px;
+}
+.agent-query-preview ul {
+  padding-left: 20px;
+}
+.agent-query-preview pre {
+  border: 1px solid var(--app-border);
+}
+.agent-web-sources {
+  margin-top: 20px;
+}
+.agent-web-sources > ol {
+  padding-left: 22px;
+}
+.agent-web-sources > ol > li {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 9px;
+  font-size: 13px;
+}
+.agent-web-sources small,
+.agent-source-url {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+.agent-web-sources small {
+  color: var(--app-muted);
+}
+.agent-source-url {
+  font-size: 12px;
+  color: var(--app-muted);
+}
+.agent-source-url textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  color: var(--app-text);
+  background: var(--app-input);
+  font: inherit;
+  resize: vertical;
+  overflow-wrap: anywhere;
+}
+.agent-year-evidence {
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}

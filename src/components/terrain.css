@@ -1,0 +1,145 @@
+.terrain-workbench,
+.terrain-figure {
+  min-width: 0;
+  border: 1px solid var(--border, #d5dddc);
+  border-radius: 10px;
+  margin: 12px 0;
+  background: var(--panel, #fff);
+}
+.terrain-workbench > summary {
+  padding: 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.terrain-workbench > summary span,
+.terrain-heading span {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted, #687572);
+  margin-left: 8px;
+}
+.terrain-workbench > section {
+  padding: 0 12px 12px;
+}
+.terrain-workbench p,
+.terrain-figure figcaption,
+.terrain-profile figcaption {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted, #65716f);
+}
+.terrain-heading {
+  padding: 12px 12px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.terrain-figure figcaption {
+  padding: 0 12px 12px;
+}
+.terrain-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  margin: 10px 0;
+}
+.terrain-controls label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+.terrain-controls input {
+  width: 100px;
+  max-width: 100%;
+  padding: 6px;
+}
+.terrain-controls select {
+  padding: 6px;
+}
+.terrain-controls > span {
+  font-size: 12px;
+}
+.terrain-controls button {
+  font-size: 12px;
+  min-height: 32px;
+}
+.terrain-controls output {
+  font-size: 12px;
+}
+.terrain-map {
+  display: block;
+  width: 100%;
+  max-height: 460px;
+  color: var(--text, #294441);
+}
+.terrain-frame {
+  fill: var(--surface, #f7faf8);
+  stroke: var(--border, #becac6);
+}
+.terrain-contours {
+  fill: none;
+  stroke: var(--plot-region-line, #81986a);
+  stroke-width: 1.35;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.terrain-contour-labels {
+  font-size: 10px;
+  fill: var(--text, #34574a);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--surface, #f7faf8);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.terrain-section-line {
+  stroke: var(--plot-geometry, #4679a9);
+  stroke-width: 1.2;
+  stroke-dasharray: 5 4;
+}
+.terrain-markers {
+  fill: var(--plot-geometry, #245f89);
+  stroke: var(--surface, #fff);
+  stroke-width: 1;
+}
+.terrain-markers text {
+  font-size: 13px;
+  stroke: none;
+}
+.terrain-scale {
+  fill: currentColor;
+  font-size: 12px;
+}
+.terrain-scale line {
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.terrain-profile {
+  margin: 12px 0;
+}
+.terrain-profile svg {
+  display: block;
+  width: 100%;
+  max-height: 250px;
+  color: var(--text, #294441);
+}
+.terrain-profile text {
+  font-size: 12px;
+  fill: currentColor;
+}
+.terrain-profile-axis {
+  stroke: currentColor;
+  fill: none;
+}
+.terrain-profile-line {
+  stroke: var(--plot-geometry, #5a947b);
+  stroke-width: 2;
+  fill: none;
+}
+.terrain-readout {
+  font-variant-numeric: tabular-nums;
+}
+.terrain-workbench [role='alert'] {
+  color: var(--app-error, #a02f2f);
+}

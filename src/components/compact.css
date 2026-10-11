@@ -231,3 +231,564 @@
 .geo-generator-preview .geography-figure svg {
   max-height: 360px;
 }
+
+/* Four distinct zones: navigation / question catalog / answer / optional tools.
+   Widths are fitted in workspace-layout.ts; DOM order and tool instances stay stable. */
+.workspace-shell {
+  --workspace-accent: var(--app-accent, #786294);
+  --workspace-line: var(--app-border, #e3dfe8);
+  --workspace-cream: var(--app-background, #faf8f4);
+  display: grid;
+  grid-template-columns: var(--navigation-width, 60px) 8px minmax(0, 1fr);
+  align-items: start;
+  background: var(--workspace-cream);
+}
+.workspace-shell .sidebar {
+  width: auto;
+  min-width: 0;
+  padding: 12px 10px 16px;
+  background: #f5f2ef;
+  border-right: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.workspace-shell .brand {
+  margin: 16px 4px 22px;
+  gap: 8px;
+}
+.workspace-shell .brand-mark {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  line-height: 34px;
+  font-size: 23px;
+  background: var(--workspace-accent);
+}
+.workspace-shell .brand strong {
+  font-size: 17px;
+}
+.workspace-shell .brand small {
+  font-size: 9px;
+}
+.workspace-shell .nav-item {
+  padding: 10px 8px;
+  gap: 8px;
+  min-height: 44px;
+  font-size: 12px;
+}
+.workspace-shell .nav-item.active {
+  background: #eae3f0;
+  color: #654b83;
+}
+.workspace-shell .nav-item.active .nav-icon,
+.workspace-shell .nav-item.active small {
+  color: #786294;
+}
+.workspace-shell .nav-dot {
+  background: #9279ad;
+}
+.workspace-shell .nav-icon {
+  flex: 0 0 24px;
+}
+.workspace-shell .sidebar-tip {
+  margin: 28px 2px 18px;
+  padding: 12px;
+}
+.workspace-shell .navigation-toggle {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: #766586;
+  font-size: 19px;
+}
+.workspace-shell .navigation-toggle:disabled {
+  opacity: 0.65;
+}
+.workspace-shell.navigation-collapsed .sidebar {
+  padding-inline: 8px;
+}
+.workspace-shell.navigation-collapsed .brand {
+  margin: 15px 5px 24px;
+}
+.workspace-shell.navigation-collapsed .brand > div,
+.workspace-shell.navigation-collapsed .workspace-label,
+.workspace-shell.navigation-collapsed .nav-item > span:not(.nav-icon),
+.workspace-shell.navigation-collapsed .sidebar-tip,
+.workspace-shell.navigation-collapsed .local-status {
+  display: none;
+}
+.workspace-shell.navigation-collapsed .nav-item {
+  justify-content: center;
+  padding: 10px 6px;
+}
+.navigation-divider-slot {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+}
+.navigation-divider-slot > .panel-divider {
+  height: 100%;
+}
+.workspace-shell .main-shell {
+  width: 100%;
+  min-width: 0;
+}
+.workspace-shell .topbar {
+  padding: 0 16px;
+  min-height: 52px;
+  height: auto;
+  background: #fcfbf9;
+  border-color: var(--workspace-line);
+}
+.workspace-shell .topbar-right {
+  gap: 10px;
+}
+.workspace-shell .breadcrumb {
+  white-space: nowrap;
+}
+.workspace-shell .offline-pill {
+  display: none;
+}
+.workspace-shell .layout-reset {
+  padding: 5px 9px;
+  font-size: 11px;
+  background: transparent;
+}
+.workspace-shell .page-content {
+  max-width: none;
+  padding: 12px 12px 0;
+}
+.workspace-shell.is-study-view .page-heading {
+  margin-bottom: 8px;
+}
+.workspace-shell.is-study-view .page-heading h1 {
+  font-size: 18px;
+  line-height: 1.5;
+}
+.workspace-shell.is-study-view .page-heading p,
+.workspace-shell.is-study-view .session-tag {
+  display: none;
+}
+.workspace-shell .learning-overview {
+  margin-bottom: 8px;
+  border-color: var(--workspace-line);
+  background: #fdfcfb;
+}
+.workspace-shell .learning-overview > summary {
+  padding: 5px 11px;
+  font-size: 11px;
+}
+.workspace-region {
+  min-width: 0;
+}
+.workspace-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  min-height: 32px;
+}
+.workspace-panel-toggles {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.workspace-panel-toggles button {
+  padding: 5px 9px;
+  font-size: 11px;
+  background: #fcfbf9;
+  border-color: #ded6e5;
+}
+.workspace-panel-toggles button[aria-expanded='true'] {
+  background: #efe8f5;
+  color: #6e5289;
+  border-color: #d9cce4;
+}
+.layout-hint {
+  font-size: 10px;
+  color: #9b90a5;
+  white-space: nowrap;
+}
+.workspace-shell .resizable-study-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  align-items: stretch;
+  height: calc(100dvh - 170px);
+  min-height: 380px;
+}
+.workspace-shell .resizable-study-layout.has-questions {
+  grid-template-columns: var(--questions-width) 8px minmax(0, 1fr);
+}
+.workspace-shell .resizable-study-layout.has-tools {
+  grid-template-columns: minmax(0, 1fr) 8px var(--tools-width);
+}
+.workspace-shell .resizable-study-layout.has-questions.has-tools {
+  grid-template-columns: var(--questions-width) 8px minmax(0, 1fr) 8px var(--tools-width);
+}
+.workspace-shell .workspace-panel,
+.workspace-shell .workspace-answer {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #cbc3d1 transparent;
+  border-color: var(--workspace-line);
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+.workspace-shell .workspace-panel[hidden] {
+  display: none;
+}
+.workspace-shell .question-library {
+  position: static;
+  max-height: none;
+}
+.workspace-shell .library-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 13px 12px;
+}
+.workspace-shell .library-heading h2 {
+  font-size: 14px;
+}
+.workspace-shell .library-heading > span {
+  margin-left: auto;
+}
+.workspace-shell .question-library .search-input {
+  width: calc(100% - 24px);
+  margin: 0 12px 10px;
+}
+.workspace-shell .question-library .subject-filters {
+  padding-inline: 12px;
+}
+.workspace-shell .question-item {
+  padding: 12px 10px;
+  gap: 8px;
+}
+.workspace-shell .question-number {
+  display: none;
+}
+.workspace-shell .question-item.selected {
+  background: #f0eaf5;
+  border-left-color: #9075aa;
+}
+.workspace-shell .question-item.selected strong {
+  color: #6d5087;
+}
+.workspace-shell .library-footnote {
+  padding: 12px;
+  font-size: 10px;
+}
+.workspace-shell .question-prompt h2 {
+  font-size: 19px;
+}
+.workspace-shell .exercise-top {
+  padding: 16px 20px 0;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.workspace-shell .question-id {
+  font-size: 9px;
+}
+.workspace-shell .answer-tabs {
+  gap: 12px;
+  padding-inline: 20px;
+  flex-wrap: wrap;
+}
+.workspace-shell .save-status {
+  margin-left: auto;
+  font-size: 9px;
+}
+.workspace-shell .exercise-actions {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.workspace-shell .page-footer {
+  padding: 10px 0;
+  font-size: 9px;
+}
+.workspace-shell .panel-close {
+  padding: 1px 7px;
+  min-width: 28px;
+  border-color: transparent;
+  background: transparent;
+  color: #897497;
+  font-size: 23px;
+  line-height: 1.2;
+}
+.panel-divider {
+  position: relative;
+  width: 8px;
+  min-height: 36px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+  border-radius: 4px;
+}
+.panel-divider > span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 120ms;
+}
+.panel-divider:hover > span,
+.panel-divider:focus-visible > span,
+.panel-divider:active > span {
+  background: #a08cb7;
+}
+.panel-divider:focus-visible {
+  outline: 2px solid #a38abd;
+  outline-offset: -1px;
+}
+.workspace-tools {
+  background: #fcfbfd;
+  container-type: inline-size;
+  container-name: workspace-tools;
+}
+.tools-panel-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e9e3ee;
+  background: #f8f4fa;
+}
+.tools-panel-heading h2 {
+  font-size: 14px;
+  color: #655173;
+}
+.tools-panel-heading .eyebrow {
+  color: #aa96bb;
+  margin-bottom: 1px;
+  font-size: 8px;
+}
+.tools-panel-content {
+  padding: 12px;
+}
+.tools-panel-intro {
+  font-size: 11px;
+  color: #93839e;
+  margin-bottom: 10px;
+}
+.workspace-tools .workbench-dock {
+  margin-top: 10px;
+  background: #fff;
+  border-color: #e1dbe7;
+}
+.workspace-tools .workbench-dock-bar {
+  gap: 5px;
+}
+.workspace-tools .workbench-dock-bar > span {
+  display: none;
+}
+.workspace-tools .workbench-dock-bar > button:first-child {
+  color: #725b85;
+  margin-right: auto;
+}
+.workspace-tools .workbench-dock-body,
+.workspace-tools .workbench-dock.is-expanded .workbench-dock-body {
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  resize: none;
+  overflow: visible;
+  padding: 0 8px 8px;
+}
+.workspace-tools .advisor-toolbar {
+  margin-top: 0;
+}
+.workspace-tools .advisor-panel {
+  position: static;
+  width: 100%;
+  max-height: none;
+  box-shadow: none;
+  padding: 12px;
+  margin: 12px 0;
+  background: #fff;
+}
+.workspace-tools .advisor-panel header h3 {
+  font-size: 14px;
+}
+.workspace-tools .knowledge-summary {
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 9px 10px !important;
+}
+.workspace-tools .knowledge-summary-meta {
+  margin-left: 0;
+}
+.workspace-tools .knowledge-body {
+  padding: 10px;
+}
+.workspace-tools .geo-generator-fields {
+  grid-template-columns: 1fr;
+}
+.workspace-tools .geo-generator > summary span {
+  display: block;
+  margin-left: 0;
+}
+.workspace-tools .math-workbench {
+  padding: 10px;
+}
+@container workspace-tools (max-width: 680px) {
+  .workspace-tools .knowledge-layout,
+  .workspace-tools .math-layout,
+  .workspace-tools .geo-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace-tools .math-controls {
+    display: block;
+  }
+  .workspace-tools .knowledge-ranges {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.workspace-scrim {
+  position: fixed;
+  inset: 52px 0 0 68px;
+  z-index: 100;
+  border: 0;
+  border-radius: 0;
+  background: #352b4344;
+  cursor: default;
+}
+.workspace-scrim:hover:not(:disabled) {
+  background: #352b4344;
+}
+.workspace-shell .workspace-drawer {
+  position: fixed;
+  z-index: 110;
+  top: 60px;
+  bottom: 12px;
+  width: min(600px, calc(100vw - 88px));
+  max-width: calc(100vw - 88px);
+  height: auto;
+  box-shadow: 0 16px 50px #32223c2b;
+  border: 1px solid #d8cbe4;
+}
+.workspace-shell .question-drawer {
+  left: 76px;
+  width: min(340px, calc(100vw - 88px));
+}
+.workspace-shell .tools-drawer {
+  right: 12px;
+}
+@media (max-width: 1250px) {
+  .workspace-shell .topbar-profile .github-profile-identity {
+    display: none;
+  }
+}
+@media (max-width: 900px) {
+  .workspace-shell .breadcrumb {
+    display: none;
+  }
+  .workspace-shell .topbar-right {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .workspace-shell .layout-hint {
+    display: none;
+  }
+  .workspace-shell .page-footer > span:last-child {
+    display: none;
+  }
+}
+@media (max-width: 550px) {
+  .workspace-shell .topbar {
+    padding-inline: 8px;
+  }
+  .workspace-shell .topbar-right {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .workspace-shell .topbar-profile {
+    margin-left: auto;
+  }
+  .workspace-shell .page-content {
+    padding-inline: 8px;
+  }
+  .workspace-shell.is-study-view .page-heading h1 {
+    font-size: 15px;
+  }
+  .workspace-shell .workspace-panel-toggles {
+    gap: 4px;
+  }
+  .workspace-shell .workspace-panel-toggles button {
+    padding: 5px 6px;
+    font-size: 10px;
+  }
+  .workspace-shell .question-prompt,
+  .workspace-shell .answer-area,
+  .workspace-shell .review-panel {
+    padding-inline: 12px;
+  }
+  .workspace-shell .exercise-top,
+  .workspace-shell .answer-tabs {
+    padding-inline: 12px;
+  }
+  .workspace-shell .resizable-study-layout {
+    height: calc(100dvh - 182px);
+  }
+  .workspace-shell .thinking-label span {
+    font-size: 10px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel-divider > span {
+    transition: none;
+  }
+}
+
+.workspace-shell .history-overview {
+  padding-top: 14px;
+  margin-bottom: 18px;
+}
+.workspace-shell .history-overview > h2 {
+  padding-inline: 14px;
+  font-size: 16px;
+}
+.workspace-shell .history-layout {
+  grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.5fr);
+  align-items: start;
+}
+.workspace-shell .history-start {
+  margin: 0 18px 18px;
+}
+@media (max-width: 1050px) {
+  .workspace-shell .history-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@container workspace-tools (max-width: 680px) {
+  .workspace-tools .geo-editor {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+  }
+}
+@container workspace-tools (max-width: 500px) {
+  .workspace-tools .math-heading {
+    display: block;
+  }
+  .workspace-tools .knowledge-metadata-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace-tools .geo-point-fields {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  }
+}

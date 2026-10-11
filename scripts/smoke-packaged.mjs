@@ -73,9 +73,15 @@ try {
     await expect(page.getByRole('heading', { name: '今天，理解得更深一点。' })).toBeVisible()
     await expect(page.locator('.page-footer')).toContainText(pkg.version)
     assert.equal(page.url(), 'examcraft://app/index.html')
-    await expect(page.getByTestId('activity-heatmap')).toBeHidden()
-    await page.locator('details.learning-overview > summary').click()
-    await expect(page.getByTestId('activity-heatmap')).toBeVisible()
+    await expect(page.getByTestId('activity-heatmap')).toHaveCount(0)
+    const navigation = page.getByRole('navigation', { name: '工作区导航' })
+    await navigation.getByRole('button', { name: '练习记录 Review & reflect', exact: true }).click()
+    const overview = page.getByRole('region', { name: '学习概览', exact: true })
+    await expect(overview).toBeVisible()
+    await expect(overview.getByTestId('activity-heatmap')).toBeVisible()
+    await expect(overview.locator('summary')).toHaveCount(0)
+    await navigation.getByRole('button', { name: '题目练习 Practice', exact: true }).click()
+    await expect(page.getByTestId('activity-heatmap')).toHaveCount(0)
     return page
   }
   let page = await launch()

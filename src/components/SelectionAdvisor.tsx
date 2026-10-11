@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import type {
+  AnswerDraft,
   AdvisorCitation,
   AdvisorResult,
   ExamCraftApi,
@@ -17,12 +19,16 @@ import {
   selectionProblem,
   type AdvisorSnapshot,
 } from '../domain/advisor-selection'
+import { ModelConsentControl } from './ModelConsentControl'
+import { ModelRequestStatus } from './ModelRequestStatus'
 import './advisor.css'
 
 interface Props {
   api: ExamCraftApi
+  active?: boolean
   config: ModelConfig | null
   question: StudentQuestion
+  draft?: AnswerDraft
   sourceRevision: string
   scopeRef: RefObject<HTMLElement | null>
   knowledgeExcerpts?: KnowledgeEvidence[]
@@ -31,10 +37,14 @@ interface Props {
 }
 const EMPTY_KNOWLEDGE_EVIDENCE: KnowledgeEvidence[] = []
 const sourceLabels = { question: '题目', material: '材料', answer: '答案', argument: '论证积木' }
+const excludedSelectionTargets =
+  '[data-advisor-exclude],input,button,select,[role="dialog"],[role="button"],[role="menu"],[role="menuitem"]'
 export function SelectionAdvisor({
+  active = true,
   api,
   config,
   question,
+  draft,
   sourceRevision,
   scopeRef,
   knowledgeExcerpts = EMPTY_KNOWLEDGE_EVIDENCE,
@@ -43,7 +53,12 @@ export function SelectionAdvisor({
 }: Props) {
   const [snapshot, setSnapshot] = useState<AdvisorSnapshot | null>(null)
   const snapshotRef = useRef<AdvisorSnapshot | null>(null)
+  const selectionOrigin = useRef<Element | null>(null)
+  const selectionDismissed = useRef(true)
+  const pointerSelecting = useRef(false)
+  const restoringEdit = useRef(false)
   const [open, setOpen] = useState(false)
+  const openRef = useRef(false)
   const [consent, setConsent] = useState(false)
   const [includeReference, setIncludeReference] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -78,6 +93,7 @@ export function SelectionAdvisor({
   currentSource.current = sourceRevision
   const closeRef = useRef<HTMLButtonElement>(null)
   const toolbarRef = useRef<HTMLButtonElement>(null)
+  const selectionActionRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLElement>(null)
   const cancel = useCallback(() => {
     const requestId = activeRequest.current
@@ -85,18 +101,11 @@ export function SelectionAdvisor({
     if (requestId) void api.cancelAdvisor(requestId).catch(() => {})
     setBusy(false)
   }, [api])
-  const close = useCallback(() => {
+  const dismiss = useCallback(() => {
     cancel()
-    setOpen(false)
-    setConsent(false)
-    setIncludeReference(false)
-    setIncludeKnowledge(false)
-    setResult(null)
-    setError('')
-    toolbarRef.current?.focus()
-  }, [cancel])
-  useEffect(() => {
-    cancel()
+    openRef.current = false
+    selectionDismissed.current = true
+    selectionOrigin.current = null
     snapshotRef.current = null
     setSnapshot(null)
     setOpen(false)
@@ -105,12 +114,22 @@ export function SelectionAdvisor({
     setIncludeKnowledge(false)
     setResult(null)
     setError('')
+  }, [cancel])
+  useEffect(() => {
+    if (!active) dismiss()
+  }, [active, dismiss])
+  const close = useCallback(() => {
+    dismiss()
+    toolbarRef.current?.focus()
+  }, [dismiss])
+  useEffect(() => {
+    dismiss()
     return () => {
       const id = activeRequest.current
       activeRequest.current = null
       if (id) void api.cancelAdvisor(id).catch(() => {})
     }
-  }, [question.id, question.subject, sourceRevision, api, cancel])
+  }, [question.id, question.subject, sourceRevision, api, dismiss])
   useEffect(() => {
     cancel()
     setConsent(false)
@@ -129,14 +148,18 @@ export function SelectionAdvisor({
   const capture = useCallback(
     (target?: EventTarget | null) => {
       const root = scopeRef.current
-      if (
-        !root ||
-        (target instanceof Node && panelRef.current?.contains(target)) ||
-        (target instanceof Element && target.closest('[data-advisor-exclude]'))
-      )
+      if (!root) return
+      if (target instanceof Node && panelRef.current?.contains(target)) return
+      if (target instanceof Element && target.closest(excludedSelectionTargets)) {
+        if (!openRef.current) dismiss()
         return
+      }
       const next = captureAdvisorSelection(root, target)
-      if (!next) return
+      if (!next) {
+        // A confirmation dialog owns an explicit snapshot. The floating action does not.
+        if (!openRef.current) dismiss()
+        return
+      }
       if (snapshotRef.current?.text !== next.text || snapshotRef.current?.source !== next.source) {
         cancel()
         setConsent(false)
@@ -145,62 +168,138 @@ export function SelectionAdvisor({
         setIncludeReference(false)
         setIncludeKnowledge(false)
       }
+      selectionDismissed.current = false
+      selectionOrigin.current = target instanceof Element ? target : document.activeElement
       snapshotRef.current = next
       setSnapshot(next)
     },
-    [scopeRef, cancel],
+    [scopeRef, cancel, dismiss],
   )
   useEffect(() => {
     const root = scopeRef.current
-    if (!root) return
-    const handleSelection = (event: Event) => capture(event.target)
+    if (!root || !active) return
+    const isAdvisorControl = (target: EventTarget | null) =>
+      target instanceof Node &&
+      (panelRef.current?.contains(target) ||
+        toolbarRef.current?.contains(target) ||
+        selectionActionRef.current?.contains(target) ||
+        (target instanceof Element && Boolean(target.closest('[data-workspace-layout-control]'))))
+    const handleSelection = (event: Event) => {
+      if (pointerSelecting.current || isAdvisorControl(event.target)) return
+      if (event instanceof KeyboardEvent) {
+        if (
+          ![
+            'Shift',
+            'ArrowLeft',
+            'ArrowRight',
+            'ArrowUp',
+            'ArrowDown',
+            'Home',
+            'End',
+            'a',
+          ].includes(event.key)
+        )
+          return
+        restoringEdit.current = false
+      }
+      if (restoringEdit.current) return
+      // A textarea can emit a queued select event after focus has already left it.
+      if (event.target instanceof HTMLTextAreaElement && event.target !== document.activeElement)
+        return
+      capture(event.target)
+    }
     const handleEdit = (event: Event) => {
       if (!(event.target instanceof Element) || event.target.closest('[data-advisor-exclude]'))
         return
-      cancel()
-      setConsent(false)
-      setResult(null)
-      setError('')
-      setOpen(false)
-      snapshotRef.current = null
-      setSnapshot(null)
+      // Undo/redo may restore a highlighted range. It is an edit, not a new request to share it.
+      restoringEdit.current =
+        event instanceof InputEvent && ['historyUndo', 'historyRedo'].includes(event.inputType)
+      dismiss()
     }
     const handleDocumentSelection = () => {
-      // Keep the snapshot when focus moves into the confirmation panel or toolbar.
+      if (pointerSelecting.current || restoringEdit.current || selectionDismissed.current) return
       if (panelRef.current?.contains(document.activeElement)) return
-      capture(document.activeElement)
+      // Keyboard focus on the action must not lose the original textarea selection.
+      capture(
+        isAdvisorControl(document.activeElement) ? selectionOrigin.current : document.activeElement,
+      )
     }
-    root.addEventListener('pointerup', handleSelection)
-    root.addEventListener('keyup', handleSelection)
+    const handlePointerDown = (event: PointerEvent) => {
+      if (isAdvisorControl(event.target)) return
+      dismiss()
+      restoringEdit.current = false
+      pointerSelecting.current = event.target instanceof Node && root.contains(event.target)
+    }
+    const handlePointerUp = (event: PointerEvent) => {
+      const selecting = pointerSelecting.current
+      pointerSelecting.current = false
+      if (selecting && !isAdvisorControl(event.target)) capture(event.target)
+    }
+    const handleFocus = (event: FocusEvent) => {
+      if (isAdvisorControl(event.target)) return
+      if (
+        !(event.target instanceof Element) ||
+        !root.contains(event.target) ||
+        event.target.closest(excludedSelectionTargets)
+      )
+        dismiss()
+    }
+    const handleBlur = () => {
+      pointerSelecting.current = false
+      dismiss()
+    }
+    const handleScroll = (event: Event) => {
+      if (!openRef.current && !isAdvisorControl(event.target)) dismiss()
+    }
+    // Native document selections can keep keyboard focus on body rather than the scope.
+    document.addEventListener('keyup', handleSelection)
     root.addEventListener('select', handleSelection, true)
     root.addEventListener('input', handleEdit, true)
     document.addEventListener('selectionchange', handleDocumentSelection)
+    document.addEventListener('pointerdown', handlePointerDown, true)
+    document.addEventListener('pointerup', handlePointerUp, true)
+    document.addEventListener('pointercancel', handleBlur, true)
+    document.addEventListener('focusin', handleFocus)
+    document.addEventListener('scroll', handleScroll, true)
+    window.addEventListener('blur', handleBlur)
     return () => {
-      root.removeEventListener('pointerup', handleSelection)
-      root.removeEventListener('keyup', handleSelection)
+      document.removeEventListener('keyup', handleSelection)
       root.removeEventListener('select', handleSelection, true)
       root.removeEventListener('input', handleEdit, true)
       document.removeEventListener('selectionchange', handleDocumentSelection)
+      document.removeEventListener('pointerdown', handlePointerDown, true)
+      document.removeEventListener('pointerup', handlePointerUp, true)
+      document.removeEventListener('pointercancel', handleBlur, true)
+      document.removeEventListener('focusin', handleFocus)
+      document.removeEventListener('scroll', handleScroll, true)
+      window.removeEventListener('blur', handleBlur)
     }
-  }, [capture, scopeRef, cancel])
+  }, [capture, scopeRef, dismiss, active])
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && (open || snapshotRef.current)) {
         event.preventDefault()
         close()
-        snapshotRef.current = null
-        setSnapshot(null)
       }
     }
     document.addEventListener('keydown', escape)
     return () => document.removeEventListener('keydown', escape)
   }, [open, close])
   function openAdvisor() {
-    capture()
-    if (!snapshotRef.current) {
+    if (!active) return
+    const root = scopeRef.current
+    const next =
+      root && !selectionDismissed.current && selectionOrigin.current?.isConnected
+        ? captureAdvisorSelection(root, selectionOrigin.current)
+        : null
+    if (!next) {
+      dismiss()
       setError('请先选择一段题目、材料或答案，再点 Ask Advisor。')
       return
     }
+    snapshotRef.current = next
+    setSnapshot(next)
+    openRef.current = true
     setOpen(true)
     setConsent(false)
     setIncludeReference(false)
@@ -210,6 +309,7 @@ export function SelectionAdvisor({
   }
   async function send() {
     if (
+      !active ||
       !snapshot ||
       !config?.configured ||
       !consentValid ||
@@ -232,18 +332,21 @@ export function SelectionAdvisor({
     setError('')
     setConsent(false)
     try {
-      const result = await api.askAdvisor({
-        requestId,
-        selectedText: snapshot.text,
-        source: snapshot.source,
-        cloudConsent: true,
-        configRevision: config.revision,
-        questionId: question.id,
-        includeReference,
-        ...(includeKnowledge
-          ? { knowledgeChunkIds: knowledgeExcerpts.map((item) => item.chunkId) }
-          : {}),
-      })
+      const result = await api.askAdvisor(
+        {
+          requestId,
+          selectedText: snapshot.text,
+          source: snapshot.source,
+          cloudConsent: true,
+          configRevision: config.revision,
+          questionId: question.id,
+          includeReference,
+          ...(includeKnowledge
+            ? { knowledgeChunkIds: knowledgeExcerpts.map((item) => item.chunkId) }
+            : {}),
+        },
+        draft,
+      )
       if (
         activeRequest.current !== requestId ||
         result.requestId !== requestId ||
@@ -261,7 +364,7 @@ export function SelectionAdvisor({
         const message = failure instanceof Error ? failure.message : ''
         const safeMessages = [
           '模型设置已更改，请重新确认本次发送。',
-          '请先在模型设置中填写 API Key；密钥仅在本次运行中有效。',
+          '请先为子角色配置可用的 API Key，可选择会话使用或本机加密保存。',
           '请确认选中文本和本次发送范围。',
           '顾问返回格式无效，请重新尝试。',
           '顾问教材引用无效，请重新尝试。',
@@ -293,33 +396,42 @@ export function SelectionAdvisor({
         <button
           type="button"
           ref={toolbarRef}
+          onPointerDown={(event) => event.preventDefault()}
           onClick={openAdvisor}
           aria-haspopup="dialog"
           aria-expanded={open}
+          aria-controls={open ? 'advisor-panel' : undefined}
         >
           ✦ Ask Advisor
         </button>
         <span className="advisor-muted">选中文字，获取思路提示</span>
         {!open && error && <span role="status">{error}</span>}
       </div>
-      {snapshot && !open && (
-        <button
-          type="button"
-          className="advisor-selection-action"
-          style={{
-            left: Math.max(8, Math.min(snapshot.x, window.innerWidth - 170)),
-            top: Math.max(8, Math.min(snapshot.y, window.innerHeight - 52)),
-          }}
-          onPointerDown={(event) => event.preventDefault()}
-          onClick={openAdvisor}
-          aria-haspopup="dialog"
-        >
-          ✦ Ask Advisor
-        </button>
-      )}
-      {open && snapshot && (
+      {active &&
+        snapshot &&
+        !open &&
+        createPortal(
+          <button
+            type="button"
+            ref={selectionActionRef}
+            className="advisor-selection-action"
+            style={{
+              left: Math.max(8, Math.min(snapshot.x, window.innerWidth - 170)),
+              top: Math.max(8, Math.min(snapshot.y, window.innerHeight - 52)),
+            }}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={openAdvisor}
+            aria-haspopup="dialog"
+            aria-expanded={false}
+          >
+            ✦ Ask Advisor
+          </button>,
+          document.body,
+        )}
+      {active && open && snapshot && (
         <section
           ref={panelRef}
+          id="advisor-panel"
           className="advisor-panel"
           role="dialog"
           aria-modal="false"
@@ -440,29 +552,34 @@ export function SelectionAdvisor({
           </p>
           {!config?.configured && (
             <p className="advisor-error">
-              请先在「题库与 Agent → 模型设置」配置接口与本次会话的密钥。
+              请先在「题库与 Agent → 模型设置」配置接口与子角色的可用密钥。
             </p>
           )}
-          <label className="advisor-check">
-            <input
-              type="checkbox"
-              checked={consentValid}
-              disabled={busy || !config?.configured}
-              onChange={(event) => {
-                setConsent(event.target.checked)
-                setConsentedScope(event.target.checked ? confirmationScope : '')
-              }}
-            />
-            我同意将以上选中文字、必要题目信息{includeReference ? '及本题解析和评分依据' : ''}
-            {includeKnowledge
-              ? `及以上 ${knowledgeExcerpts.length} 条教材摘录、书名和物理 PDF 页码`
-              : ''}
-            发送到上述顾问接口和模型，可能产生服务商费用。
-          </label>
+          <ModelConsentControl
+            api={api}
+            config={config}
+            scopes={[
+              'advisor',
+              ...(includeReference ? (['reference'] as const) : []),
+              ...(includeKnowledge && knowledgeExcerpts.length ? (['knowledge'] as const) : []),
+            ]}
+            checked={consentValid}
+            disabled={busy || !config?.configured}
+            onChange={(value) => {
+              setConsent(value)
+              setConsentedScope(value ? confirmationScope : '')
+            }}
+            label={`我同意将以上选中文字、必要题目信息${includeReference ? '及本题解析和评分依据' : ''}${
+              includeKnowledge
+                ? `及以上 ${knowledgeExcerpts.length} 条教材摘录、书名和物理 PDF 页码`
+                : ''
+            }发送到上述顾问接口和模型，可能产生服务商费用。`}
+          />
           <div className="advisor-actions">
             <button
               type="button"
               onClick={() => void send()}
+              aria-busy={busy}
               disabled={
                 !consentValid ||
                 !config?.configured ||
@@ -471,7 +588,7 @@ export function SelectionAdvisor({
                 !!invalidKnowledge
               }
             >
-              {busy ? '正在思考…' : '确认并获取提示'}
+              {busy ? '正在请求提示…' : '确认并获取提示'}
             </button>
             {busy && (
               <button
@@ -487,8 +604,8 @@ export function SelectionAdvisor({
               </button>
             )}
           </div>
+          {busy && <ModelRequestStatus label="顾问提示请求" />}
           <div aria-live="polite" aria-atomic="true">
-            {busy && <p role="status">正在等待模型提示…</p>}
             {error && (
               <p className="advisor-error" role="alert">
                 {error}

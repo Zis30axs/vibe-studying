@@ -6,6 +6,7 @@ import { DeepSeekAgent } from '../src/adapters/deepseek-agent'
 import { LocalQuestionBank } from '../src/adapters/local-question-bank'
 import { LocalRuleAgent } from '../src/adapters/local-rule-agent'
 import { StudyService } from '../src/domain/study-service'
+import { parseFunctionExpression, sampleFunction } from '../src/domain/math'
 import { emptyDraft, type AnswerDraft, type Question } from '../src/shared/types'
 
 const syntheticKey = 'synthetic-math-key-no-network'
@@ -87,6 +88,48 @@ describe('math tools service, persistence and synthetic cloud integration', () =
     expect(state.attempts.map((attempt) => attempt.draft)).toEqual([draft, next])
     expect(first.id).not.toBe(second.id)
     expect(state.attempts[0].draft.math!.measurement).toEqual(['A', 'B', 'C'])
+  })
+
+  it('restores canonical shorthand input and preserves it in a submitted snapshot', async () => {
+    const service = new StudyService(directory, bank, local)
+    const draft = mathDraft()
+    draft.math!.expression = parseFunctionExpression('y = ax^2 + bx + c').normalizedExpression
+    await service.saveDraft(question.id, draft)
+    const restored = new StudyService(directory, new LocalQuestionBank(directory), local)
+    const reloaded = (await restored.loadState()).drafts[question.id]
+    expect(reloaded.math!.expression).toBe('a*x^2+b*x+c')
+    expect(sampleFunction(reloaded.math!.expression, reloaded.math!.parameters)).toEqual(
+      sampleFunction('y = ax^2 + bx + c', draft.math!.parameters),
+    )
+    await restored.submitAnswer(question.id, reloaded)
+    const state = await new StudyService(directory, bank, local).loadState()
+    expect(state.attempts[0].draft.math).toEqual(draft.math)
+  })
+
+  it('persists canvas preferences and snapped points independently of later edits', async () => {
+    const service = new StudyService(directory, bank, local)
+    const draft = mathDraft()
+    Object.assign(draft.math!, {
+      snapStep: 0.125,
+      showProjections: false,
+      projectionColor: '#336699',
+    })
+    draft.math!.drawing.points[0] = { id: 'A', label: 'A', x: -2.375, y: 1.125 }
+    await service.saveDraft(question.id, draft)
+    const restored = new StudyService(directory, new LocalQuestionBank(directory), local)
+    expect((await restored.loadState()).drafts[question.id]).toEqual(draft)
+    await restored.submitAnswer(question.id, draft)
+    const edited = structuredClone(draft)
+    edited.math!.snapStep = 1
+    edited.math!.showProjections = true
+    edited.math!.projectionColor = '#b8c0c8'
+    await restored.saveDraft(question.id, edited)
+    const state = await new StudyService(directory, bank, local).loadState()
+    expect(state.attempts[0].draft.math).toEqual(draft.math)
+    expect(state.drafts[question.id].math).toEqual(edited.math)
+    await expect(
+      restored.saveDraft(question.id, { ...edited, math: { ...edited.math!, snapStep: 0 } }),
+    ).rejects.toThrow()
   })
 
   it('loads pre-workbench version-1 drafts and attempts without migration or manufactured math state', async () => {

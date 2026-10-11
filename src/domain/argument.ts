@@ -121,6 +121,7 @@ export function argumentFromDraft(draft: AnswerDraft): ArgumentDocument {
     return {
       version: 1,
       roots: cloneRoots(draft.argument.roots),
+      ...(draft.argument.groups ? { groups: structuredClone(draft.argument.groups) } : {}),
       ...(draft.argument.canvas ? { canvas: structuredClone(draft.argument.canvas) } : {}),
       ...(draft.argument.revisions ? { revisions: structuredClone(draft.argument.revisions) } : {}),
     }
@@ -245,7 +246,7 @@ export function argumentCanvas(document: ArgumentDocument): ArgumentCanvas {
     const saved = document.canvas?.positions[node.id]
     positions[node.id] = saved
       ? { x: boundArgumentCoordinate(saved.x), y: boundArgumentCoordinate(saved.y) }
-      : { x: 24 + (index % 3) * 260, y: 24 + Math.floor(index / 3) * 180 }
+      : { x: 24 + (index % 3) * 236, y: 24 + Math.floor(index / 3) * 142 }
   })
   const viewport = document.canvas?.viewport ?? { x: 0, y: 0, zoom: 1 }
   if (!Number.isFinite(viewport.zoom)) throw new Error('画布缩放无效')

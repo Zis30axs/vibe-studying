@@ -588,3 +588,95 @@
     flex-basis: 100%;
   }
 }
+
+/* Compact explicit groups sit behind their independently editable member cards. */
+.free-node {
+  height: 130px;
+}
+.free-composer .free-node textarea {
+  height: 59px;
+  max-height: 59px;
+}
+.free-node.is-grouped {
+  border-radius: 5px;
+  box-shadow: 0 1px 3px #27476112;
+}
+.free-group {
+  position: absolute;
+  border: 2px solid #92afc7;
+  border-radius: 10px;
+  background: #e7eff6b3;
+}
+.free-group.is-selected {
+  border-color: #376988;
+  box-shadow: 0 0 0 2px #6d9ebb4a;
+}
+.free-group-handle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  padding: 3px 8px;
+  border: 0;
+  background: #d7e6f2;
+  color: #244963;
+  border-radius: 8px 8px 0 0;
+  font-size: 11px;
+  text-align: left;
+  cursor: grab;
+  touch-action: none;
+  overflow: hidden;
+}
+.free-group-handle small {
+  flex-shrink: 0;
+  padding-left: 8px;
+  font-size: 9px;
+}
+.free-node.is-extractable {
+  outline: 2px dashed #257557;
+  outline-offset: 1px;
+}
+.free-node.is-snap-target,
+.free-group.is-snap-target {
+  outline: 3px dashed #257557;
+  outline-offset: 3px;
+}
+.free-snap-preview {
+  margin: 5px 0;
+  color: #1b694d;
+  font-size: 12px;
+}
+.free-inspector input {
+  max-width: 230px;
+  padding: 4px;
+  font-size: 11px;
+}
+
+.free-composer {
+  container-type: inline-size;
+}
+@container (max-width: 520px) {
+  .free-composer .humanities-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .free-inspector label {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+  .free-inspector input,
+  .free-inspector select {
+    max-width: 100%;
+  }
+  .free-group-tools label {
+    width: 100%;
+  }
+  .free-template[open] {
+    flex-wrap: wrap;
+  }
+  .free-help {
+    line-height: 1.6;
+  }
+}
