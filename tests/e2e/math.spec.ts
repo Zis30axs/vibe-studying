@@ -114,6 +114,15 @@ test('math tools: drag, precise edits, measurements, function, undo, snapshots a
     await expect(page.getByLabel('审阅结果').getByLabel('函数表达式')).toBeDisabled()
     await page.getByRole('button', { name: /重新练习/ }).click()
     await expect(page.getByLabel('函数表达式')).toHaveValue('a*x^2+b*x+c')
+    await expect(work.getByText('当前已保存：a*x^2+b*x+c', { exact: true })).toBeVisible()
+    await expect(work.getByLabel('参数 a 数值')).toHaveValue('1')
+    await expect(work.getByText('0 个点 · 0 条线', { exact: true })).toBeVisible()
+    await expect
+      .poll(async () => {
+        const state = await page.evaluate(() => window.examcraft!.loadState())
+        return state.drafts['math-solution-1'].math?.expression
+      })
+      .toBe('a*x^2+b*x+c')
     await page
       .getByRole('navigation')
       .getByRole('button', { name: /练习记录/ })

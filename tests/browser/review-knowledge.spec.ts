@@ -15,7 +15,7 @@ const secondNodeId = `rkn-${'b'.repeat(64)}`
 const fixture = async (page: Page) => {
   await page.route('**/review-knowledge-fixture', (route) =>
     route.fulfill({
-      contentType: 'text/html',
+      contentType: 'text/html; charset=utf-8',
       body: `<!doctype html><html><body><div id="root"></div>
     <script type="module">
       import RefreshRuntime from '/@react-refresh'; RefreshRuntime.injectIntoGlobalHook(window);

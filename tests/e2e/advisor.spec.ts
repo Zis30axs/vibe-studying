@@ -516,7 +516,7 @@ test('outside dismissal cancels an outstanding request and the closed dialog sta
 
 test('Advisor matches the light workspace and honors reduced motion without transforms', async () => {
   const page = await launch()
-  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'light' })
   await selectAnswer(page, 'selected phrase', 0, 8)
   const action = page.locator('.advisor-selection-action')
   const actionStyle = await action.evaluate((element) => {
@@ -530,15 +530,15 @@ test('Advisor matches the light workspace and honors reduced motion without tran
     }
   })
   expect(actionStyle).toEqual({
-    background: 'rgb(255, 255, 255)',
-    color: 'rgb(22, 125, 134)',
+    background: 'rgb(255, 253, 250)',
+    color: 'rgb(48, 46, 56)',
     radius: '7px',
     animation: 'none',
     transform: 'none',
   })
   await action.click()
   const panel = page.getByRole('dialog', { name: 'Ask Advisor · 思路提示' })
-  await expect(panel).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  await expect(panel).toHaveCSS('background-color', 'rgb(255, 253, 250)')
   await expect(panel).toHaveCSS('border-radius', '11px')
   await expect(panel).toHaveCSS('animation-name', 'none')
   await expect(panel).toHaveCSS('transform', 'none')

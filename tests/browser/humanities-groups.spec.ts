@@ -18,7 +18,7 @@ declare global {
 async function openFixture(page: Page) {
   await page.route('**/humanities-group-fixture', (route) =>
     route.fulfill({
-      contentType: 'text/html',
+      contentType: 'text/html; charset=utf-8',
       body: `<!doctype html><html><body><div id="root"></div>
     <script type="module">
       import RefreshRuntime from '/@react-refresh'; RefreshRuntime.injectIntoGlobalHook(window);
@@ -47,7 +47,7 @@ async function openFixture(page: Page) {
         return h('main', { style: { width: '1100px', margin: '10px auto', display: 'block' } }, h(HumanitiesComposer, { subject: 'history', draft, disabled, active,
           onChange(value) { sessionStorage.setItem('synthetic-groups', JSON.stringify(value)); setDraft(value); },
           question: { id: 'synthetic-question', subject: 'history', kind: 'history', title: '合成题', prompt: '（1）说明原因。（2）分析影响。', source: '合成测试', tags: [], maxScore: 1 },
-          config: { configured: true, protocol: 'openai-chat', baseUrl: 'https://synthetic.example/v1', model: 'synthetic-model', revision: 1 }, api
+          config: { configured: true, protocol: 'openai-chat', baseUrl: 'https://synthetic.example.com/v1', model: 'synthetic-model', revision: 1 }, api
         }));
       }
       createRoot(document.getElementById('root')).render(h(App));
@@ -209,6 +209,7 @@ test('scoped AI request sends partial group data, consent resets when grouping c
   await page.getByRole('button', { name: '✦ 检查模块', exact: true }).click()
   const panel = page.getByRole('dialog', { name: '模块检查 · 保留好思路' })
   const consent = panel.getByRole('checkbox', { name: /^我同意将上述检查内容/ })
+  await expect(consent).toBeEnabled()
   await consent.check()
   await panel.getByRole('button', { name: '确认并检查模块', exact: true }).click()
   await expect(panel.getByRole('button', { name: '正在检查…', exact: true })).toBeVisible()
@@ -263,6 +264,7 @@ test('hiding the mounted workbench cancels gestures and review without losing th
   await page.getByRole('button', { name: '✦ 检查模块', exact: true }).click()
   const panel = page.getByRole('dialog', { name: '模块检查 · 保留好思路' })
   const consent = panel.getByRole('checkbox', { name: /^我同意将上述检查内容/ })
+  await expect(consent).toBeEnabled()
   await consent.check()
   await panel.getByRole('button', { name: '确认并检查模块', exact: true }).click()
   await page.evaluate(() => window.groupFixture.setActive(false))
@@ -282,6 +284,7 @@ test('group label edits revoke checked one-off consent before a request is sent'
   await page.getByRole('button', { name: '✦ 检查模块', exact: true }).click()
   const panel = page.getByRole('dialog', { name: '模块检查 · 保留好思路' })
   const consent = panel.getByRole('checkbox', { name: /^我同意将上述检查内容/ })
+  await expect(consent).toBeEnabled()
   await consent.check()
   await expect(panel.getByRole('button', { name: '确认并检查模块', exact: true })).toBeEnabled()
   await groups(page).getByRole('button').click()

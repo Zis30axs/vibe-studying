@@ -1,11 +1,17 @@
 import { test, expect, type Page } from '@playwright/test'
-import type { AnswerDraft, ExamCraftApi, StudyState } from '../../src/shared/types'
+import type {
+  AnswerDraft,
+  ExamCraftApi,
+  MathWorkbenchState,
+  StudyState,
+} from '../../src/shared/types'
 
 // Renderer regression only: actual disk persistence is covered in math-integration.test.ts
 // and the real Electron restart flow remains in tests/e2e/math.spec.ts.
 declare global {
   interface Window {
     mathTest: { state: StudyState; saves: AnswerDraft[] }
+    mathResetFixture: { value: MathWorkbenchState; reset(): void }
   }
 }
 const workbench = (page: Page) =>
@@ -196,6 +202,49 @@ test('sliders, demos, clear, undo and reset still work after applying shorthand'
   await expect(input).toHaveValue('')
   await expect(work.getByLabel('参数 a 数值')).toHaveValue('1.1')
   await expect(work.getByRole('alert')).toHaveCount(0)
+})
+
+test('mounted math input follows an external restart and preserves unapplied text during parameter edits', async ({
+  page,
+}) => {
+  await page.route('**/math-reset-fixture', (route) =>
+    route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: `<!doctype html><html><body><div id="root"></div>
+      <script type="module">
+        import RefreshRuntime from '/@react-refresh'; RefreshRuntime.injectIntoGlobalHook(window);
+        window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => type => type;
+        window.__vite_plugin_react_preamble_installed__ = true;
+      </script>
+      <script type="module">
+        import React, { useState, createRoot } from '/tests/browser/fixtures/react.ts';
+        import { MathWorkbench } from '/src/components/MathWorkbench.tsx';
+        import { emptyMathState } from '/src/shared/types.ts';
+        import '/src/styles.css';
+        function Fixture() {
+          const [value, setValue] = useState(() => ({ ...emptyMathState(), expression: 'a/(x-b)+c' }));
+          window.mathResetFixture = { value, reset: () => setValue(emptyMathState()) };
+          return React.createElement(MathWorkbench, { value, onChange: setValue });
+        }
+        createRoot(document.getElementById('root')).render(React.createElement(Fixture));
+      </script></body></html>`,
+    }),
+  )
+  await page.goto('/math-reset-fixture')
+  const work = page.getByRole('region', { name: '数学交互工作台', exact: true })
+  const input = work.getByLabel('函数表达式')
+  await expect(input).toHaveValue('a/(x-b)+c')
+  const inputId = await input.getAttribute('id')
+  await input.fill('y=2x')
+  await work.getByLabel('参数 a 数值').fill('2')
+  await expect(input).toHaveValue('y=2x')
+  expect(await page.evaluate(() => window.mathResetFixture.value.expression)).toBe('a/(x-b)+c')
+  await page.evaluate(() => window.mathResetFixture.reset())
+  await expect(input).toHaveValue('a*x^2+b*x+c')
+  await expect(input).toHaveAttribute('id', inputId!)
+  await expect(work.getByText('识别为：y = a*x^2+b*x+c', { exact: true })).toBeVisible()
+  await expect(work.getByText('当前已保存：a*x^2+b*x+c', { exact: true })).toBeVisible()
+  await expect(work.getByLabel('参数 a 数值')).toHaveValue('1')
 })
 
 async function mathClient(page: Page, x: number, y: number) {

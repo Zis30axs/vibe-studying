@@ -28,7 +28,7 @@ const rememberLabel = '记住对此接收方和数据范围的同意，下次不
 async function openFixture(page: Page) {
   await page.route('**/consent-fixture', (route) =>
     route.fulfill({
-      contentType: 'text/html',
+      contentType: 'text/html; charset=utf-8',
       body: `<!doctype html><html><body><div id="root"></div>
       <script type="module">
         import RefreshRuntime from '/@react-refresh';
@@ -98,7 +98,9 @@ const remember = (page: Page) =>
   primary(page).getByRole('checkbox', { name: rememberLabel, exact: true })
 async function grantRemembered(page: Page) {
   await remember(page).check()
-  await consent(page).check()
+  // Remembering commits after the persistence promise; verify the resulting state.
+  await consent(page).click()
+  await expect(consent(page)).toBeChecked()
   await expect(primary(page).getByText('已在本机记住同意 · 查看范围与撤销方式')).toBeVisible()
 }
 

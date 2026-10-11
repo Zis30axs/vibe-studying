@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { AgentRunRequest, AgentRunState, AgentWorkbenchApi } from '../shared/agent-workbench'
 import { AGENT_BUDGET } from '../shared/agent-workbench'
 import type { AgentToolName, AgentToolProposal } from '../shared/agent-tool-context'
@@ -342,7 +342,10 @@ export function AgentWorkbench({
       session.invalidate('已离开 Agent 工作台，任务与待确认预览已停止。已发请求仍可能计费。')
     }
   }, [session])
-  useEffect(() => {
+  // Invalidate one-off choices before ModelConsentControl's passive effect reapplies
+  // a remembered receiver/category grant. A parent passive reset can otherwise
+  // overwrite that child's recheck in the same batch and leave it stuck unchecked.
+  useLayoutEffect(() => {
     if (lastScope.current === scopeKey) return
     lastScope.current = scopeKey
     session.invalidate()

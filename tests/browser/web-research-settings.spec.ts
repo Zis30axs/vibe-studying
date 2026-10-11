@@ -15,7 +15,7 @@ declare global {
 async function openFixture(page: Page, secureStorageAvailable = true) {
   await page.route('**/web-research-settings-fixture', (route) =>
     route.fulfill({
-      contentType: 'text/html',
+      contentType: 'text/html; charset=utf-8',
       body: `<!doctype html><html><body><div id="root"></div>
     <script type="module">
       import RefreshRuntime from '/@react-refresh';

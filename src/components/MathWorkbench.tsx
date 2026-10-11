@@ -77,6 +77,9 @@ export function MathWorkbench({
   const [selected, setSelected] = useState('')
   const [lineStart, setLineStart] = useState('')
   const [expression, setExpression] = useState(value.expression)
+  // The workbench stays mounted while reviewing/restarting an answer. Follow a
+  // changed saved expression, but preserve unapplied input during unrelated edits.
+  useEffect(() => setExpression(value.expression), [value.expression])
   const [message, setMessage] = useState('')
   const parsedExpression = useMemo(() => {
     if (!expression.trim()) return { normalizedExpression: '', error: '' }

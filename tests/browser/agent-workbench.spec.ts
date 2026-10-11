@@ -27,7 +27,7 @@ const startLabel = '开始本次 Agent 任务'
 async function openFixture(page: Page, rememberedWeb = false) {
   await page.route('**/agent-workbench-fixture', (route) =>
     route.fulfill({
-      contentType: 'text/html',
+      contentType: 'text/html; charset=utf-8',
       body: `<!doctype html><html><body><div id="root"></div>
   <script type="module">
     import RefreshRuntime from '/@react-refresh';
@@ -135,7 +135,13 @@ test('normal run sends only chosen scope and displays real result metadata as es
   ])
   await page.evaluate(() => window.agentFixture.finish())
   await expect(page.getByText('<script>plain model output</script>', { exact: true })).toBeVisible()
-  await expect(page.getByLabel('本次运行状态').getByText('数学测量', { exact: true })).toBeVisible()
+  const measurementEvent = page
+    .getByLabel('本次运行状态')
+    .getByRole('listitem')
+    .filter({ has: page.getByText('math_measure', { exact: true }) })
+  await expect(measurementEvent).toHaveCount(1)
+  await expect(measurementEvent).toContainText('数学测量')
+  await expect(measurementEvent).toContainText('完成')
   await expect(page.getByText('主模型 2 / 3', { exact: true })).toBeVisible()
   expect(await page.locator('.agent-output script').count()).toBe(0)
   expect(await page.evaluate(() => window.agentFixture.starts)).toBe(1)
@@ -290,7 +296,18 @@ test('remembered grants do not enable network and exact public scope changes can
   await expect(query).toContainText('数学 函数与导数 全国卷 2023 2024 历年试题 考点 公开资料')
   await expect(query).not.toContainText('PRIVATE TASK')
   await expect(query).not.toContainText('Original answer')
-  await expect(page.getByRole('checkbox', { name: '我同意向 Tavily', exact: false })).toBeChecked()
+  const webConsent = page.getByRole('checkbox', { name: '我同意向 Tavily', exact: false })
+  await expect(webConsent).toBeChecked()
+  // Scope edits cancel prior work, but the same receiver/data-category grant
+  // remains valid. Repeated edits must not race the child consent reconciliation.
+  await page.getByRole('textbox', { name: '公开章节 / 主题', exact: true }).fill('数列')
+  await expect(webConsent).toBeChecked()
+  await page.getByRole('textbox', { name: '公开章节 / 主题', exact: true }).fill('函数与导数')
+  await page.getByRole('textbox', { name: '公开年份（最多 5 个）', exact: true }).fill('2022')
+  await expect(webConsent).toBeChecked()
+  await page.getByRole('textbox', { name: '公开年份（最多 5 个）', exact: true }).fill('2023,2024')
+  await expect(webConsent).toBeChecked()
+  expect(await page.evaluate(() => window.agentFixture.starts)).toBe(0)
   await expect(page.getByRole('button', { name: startLabel, exact: true })).toBeEnabled()
   await page.getByRole('button', { name: startLabel, exact: true }).click()
   const request = await page.evaluate(() => window.agentFixture.lastRequest)

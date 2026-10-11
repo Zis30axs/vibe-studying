@@ -5,7 +5,7 @@ test('help reference, accepted merge, subject isolation, inert text and explicit
 }) => {
   await page.route('**/learning-graph-fixture', (route) =>
     route.fulfill({
-      contentType: 'text/html',
+      contentType: 'text/html; charset=utf-8',
       body: `<!doctype html><html><body><div id="root"></div>
   <script type="module">
     import RefreshRuntime from '/@react-refresh'; RefreshRuntime.injectIntoGlobalHook(window);
@@ -56,7 +56,7 @@ test('help reference, accepted merge, subject isolation, inert text and explicit
   expect(
     await page.evaluate(() => (window as unknown as { graphRestores: number }).graphRestores),
   ).toBe(1)
-  await graph.getByLabel('学科', { exact: true }).selectOption('history')
+  await graph.getByRole('combobox', { name: '学科', exact: true }).selectOption('history')
   await expect(graph.locator('.learning-snapshot')).toHaveCount(1)
   await expect(graph.locator('.learning-snapshot .assistance-badge')).toHaveText('来源未记录')
   await page.evaluate(() => {
