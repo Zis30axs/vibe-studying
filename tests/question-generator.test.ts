@@ -43,8 +43,20 @@ function envelope(protocol: ModelProtocol, data: unknown) {
 }
 const directories: string[] = []
 afterEach(async () => {
+  vi.useRealTimers()
   await Promise.all(directories.splice(0).map((d) => rm(d, { recursive: true, force: true })))
 })
+function stalledFetch() {
+  let markStarted!: () => void
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve
+  })
+  const fetchImpl: typeof fetch = () => {
+    markStarted()
+    return new Promise(() => {})
+  }
+  return { started, fetchImpl }
+}
 async function setup(
   protocol: ModelProtocol = 'openai-chat',
   output: unknown = valid,
@@ -154,37 +166,60 @@ it('bounds quota, clears discarded tokens, and does not retry', async () => {
   expect(fetcher).toHaveBeenCalledTimes(5)
 })
 it('bounds concurrency and cancels in-flight generation', async () => {
-  const { models, fetcher, request } = await setup(
-    'openai-chat',
-    valid,
-    () => new Promise(() => {}),
-  )
+  const { started, fetchImpl } = stalledFetch()
+  const { models, fetcher, request } = await setup('openai-chat', valid, fetchImpl)
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   const pending = models.generateGeographyQuestion(request)
-  const assertion = expect(pending).rejects.toThrow(/取消/)
-  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+  // Observe early failures immediately; the original promise is asserted below.
+  void pending.catch(() => {})
+  await started
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  await vi.advanceTimersByTimeAsync(99)
   await expect(
     models.generateGeographyQuestion({ ...request, requestId: 'other' }),
   ).rejects.toThrow(/进行中/)
+  expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(false)
   models.cancelQuestionGeneration(request.requestId)
-  await assertion
+  await expect(pending).rejects.toThrow(/取消/)
+  expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true)
+  expect(vi.getTimerCount()).toBe(0)
   expect(models.getGenerationStatus()).toEqual({ used: 1, limit: 5, pending: 0 })
 })
 it('config change aborts generation and cannot deliver stale preview', async () => {
-  const { models, fetcher, request, config } = await setup(
-    'openai-chat',
-    valid,
-    () => new Promise(() => {}),
-  )
+  const { started, fetchImpl } = stalledFetch()
+  const { models, fetcher, request, config } = await setup('openai-chat', valid, fetchImpl)
+  // Disk writes may take longer than 100ms; only the explicit clock controls the deadline.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   const pending = models.generateGeographyQuestion(request)
-  const assertion = expect(pending).rejects.toThrow(/取消/)
-  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+  void pending.catch(() => {})
+  await started
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  await vi.advanceTimersByTimeAsync(99)
+  expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(false)
   await models.saveConfig({
     protocol: config.protocol,
     baseUrl: config.baseUrl,
     model: 'new-model',
   })
-  await assertion
+  await expect(pending).rejects.toThrow(/取消/)
+  expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true)
+  expect(vi.getTimerCount()).toBe(0)
   expect(models.getGenerationStatus().pending).toBe(0)
+})
+it('times out stalled generation at the deadline without cancellation', async () => {
+  const { started, fetchImpl } = stalledFetch()
+  const { models, fetcher, persist, request } = await setup('openai-chat', valid, fetchImpl)
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  const pending = models.generateGeographyQuestion(request)
+  void pending.catch(() => {})
+  await started
+  await vi.advanceTimersByTimeAsync(100)
+  await expect(pending).rejects.toThrow(/超时/)
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true)
+  expect(persist).not.toHaveBeenCalled()
+  expect(vi.getTimerCount()).toBe(0)
+  expect(models.getGenerationStatus()).toEqual({ used: 1, limit: 5, pending: 0 })
 })
 it('bounds pending previews and serializes repeated accepts', async () => {
   let index = 0
