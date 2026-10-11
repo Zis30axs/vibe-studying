@@ -286,7 +286,11 @@ export interface ModelDiagnosticInput {
   kind: 'list' | 'test'
 }
 export interface ModelDiagnosticResult {
-  error?: { code: string; message: string }
+  error?: {
+    code: string
+    message: string
+    details?: import('./model-connection-diagnostics').ModelConnectionDetails
+  }
   models?: { id: string; name?: string }[]
   latencyMs?: number
 }

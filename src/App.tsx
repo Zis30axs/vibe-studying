@@ -10,6 +10,7 @@ import type {
   StudentQuestion,
   StudyState,
   ModelProfilesState,
+  Subject,
 } from './shared/types'
 import { emptyDraft, emptyMathState } from './shared/types'
 import { subjects, subjectLabel, kindLabel, subjectGuidance } from './shared/subjects'
@@ -41,6 +42,12 @@ import {
 } from './components/ReviewKnowledgePanel'
 import { AgentWorkbench } from './components/AgentWorkbench'
 import { acceptedAgentDraft } from './domain/agent-workbench-ui'
+import {
+  filterStudyQuestions,
+  isStudyView as isStudyRoute,
+  navigateStudyQuestionContext,
+  type StudyQuestionContext,
+} from './domain/study-question-context'
 import type { KnowledgeEvidence } from './shared/knowledge'
 import type { AdvisorCitation } from './shared/types'
 import { GeographyGenerator } from './components/GeographyGenerator'
@@ -240,13 +247,22 @@ export default function App() {
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState('')
   const [view, setView] = useState<View>('practice')
+  const [questionContext, setQuestionContext] = useState<StudyQuestionContext>({
+    view: 'practice',
+    subject: 'all',
+    query: '',
+    selectedId: '',
+  })
+  const { view: questionView, subject, query, selectedId } = questionContext
+  const setSelectedId = (selectedId: string) =>
+    setQuestionContext((previous) => ({ ...previous, selectedId }))
+  const setSubject = (subject: Subject | 'all') =>
+    setQuestionContext((previous) => ({ ...previous, subject }))
+  const setQuery = (query: string) => setQuestionContext((previous) => ({ ...previous, query }))
   const [formulaOrigin, setFormulaOrigin] = useState<View>('practice')
   const workspaceView = view === 'formulas' ? formulaOrigin : view
   const currentViewRef = useRef<View>(view)
   currentViewRef.current = view
-  const [subject, setSubject] = useState('all')
-  const [query, setQuery] = useState('')
-  const [selectedId, setSelectedId] = useState('')
   const [tab, setTab] = useState<'answer' | 'review'>('answer')
   const [busy, setBusy] = useState(false)
   const [provider, setProvider] = useState<'local' | 'cloud'>('local')
@@ -283,7 +299,7 @@ export default function App() {
       element?.scrollIntoView({ block: 'center' })
     }
   }, [view])
-  const isStudyView = ['practice', 'math', 'politics', 'geography'].includes(view)
+  const isStudyView = isStudyRoute(view)
 
   async function load() {
     if (!api) {
@@ -316,17 +332,7 @@ export default function App() {
     void load()
   }, [])
 
-  const filtered = questions.filter((q) => {
-    if (workspaceView === 'math' && q.subject !== 'math') return false
-    if (
-      workspaceView === 'politics' &&
-      !['politics', 'history', 'chinese', 'geography'].includes(q.kind)
-    )
-      return false
-    if (workspaceView === 'geography' && q.kind !== 'geography') return false
-    if (subject !== 'all' && q.subject !== subject) return false
-    return `${q.title} ${q.tags.join(' ')} ${q.source}`.toLowerCase().includes(query.toLowerCase())
-  })
+  const filtered = filterStudyQuestions(questions, questionView, subject, query)
   const selected = filtered.find((q) => q.id === selectedId) ?? filtered[0]
   currentQuestionId.current = selected?.id
   useEffect(() => {
@@ -354,13 +360,23 @@ export default function App() {
     if (busy || next === view) return
     const navigate = () => {
       if (next === 'formulas') setFormulaOrigin(view)
+      // Commit the visible fallback before leaving a study page, rather than reviving
+      // an old selection when an auxiliary page opens. Empty searches stay empty.
+      const leavingStudy =
+        isStudyRoute(view) || (view === 'formulas' && isStudyRoute(formulaOrigin))
+      setQuestionContext((previous) =>
+        navigateStudyQuestionContext(
+          previous,
+          next,
+          leavingStudy ? { id: selected?.id ?? '' } : undefined,
+        ),
+      )
       setView(next)
       layout.closeDrawers()
-      // Preserve practice state only for a formula lookup and return to its origin.
-      if (next !== 'formulas' && !(view === 'formulas' && next === formulaOrigin)) {
+      // Agent and other auxiliary pages share the exact last study scope. Only an
+      // explicit move to a different study workspace resets the list filters.
+      if (isStudyRoute(next) && next !== questionView) {
         setKnowledgeExcerpts([])
-        setSubject('all')
-        setQuery('')
         setTab('answer')
       }
       setMessage('')
@@ -839,7 +855,7 @@ export default function App() {
                             aria-pressed={subject === id}
                             disabled={busy}
                             onClick={() => {
-                              setSubject(id)
+                              setSubject(id as Subject | 'all')
                               setTab('answer')
                             }}
                           >
@@ -1420,7 +1436,17 @@ export default function App() {
                                 expectedHeadId,
                               })
                               setState(await api.loadState())
-                              setSelectedId(restored.questionId)
+                              // An explicit restore chooses a question, regardless of the
+                              // old study filters. A late result must not change a newer route.
+                              if (currentViewRef.current === 'history') {
+                                setQuestionContext({
+                                  view: 'practice',
+                                  subject: 'all',
+                                  query: '',
+                                  selectedId: restored.questionId,
+                                })
+                                setTab('answer')
+                              }
                               setMessage('已恢复为新的作答分支；原历史保留。')
                             }
                           : undefined

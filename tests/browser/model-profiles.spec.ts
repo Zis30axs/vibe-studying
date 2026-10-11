@@ -418,3 +418,54 @@ test('late saves cannot overwrite newer profile navigation and double submit is 
   await form.getByLabel('当前编辑配置').selectOption('child')
   await expect(form.getByLabel('配置名称', { exact: true })).toHaveValue('Delayed saved child')
 })
+
+test('model discovery shows safe failure stage and HTTP status without requiring a selected model', async ({
+  page,
+}) => {
+  await openSettings(page)
+  const form = settings(page)
+  await form.getByLabel('模型名称', { exact: true }).fill('')
+  await expect(form.getByRole('button', { name: '获取模型', exact: true })).toBeEnabled()
+  await expect(form.getByRole('button', { name: '测试 API 连接', exact: true })).toBeDisabled()
+  await page.evaluate(() => {
+    window.modelTest.response = {
+      error: {
+        code: 'dns',
+        message: 'PROVIDER_SECRET',
+        details: { stage: 'dns', networkCode: 'ENOTFOUND' },
+      },
+    }
+  })
+  await form.getByRole('button', { name: '获取模型', exact: true }).click()
+  await expect(form.getByText(/无法解析服务域名/)).toBeVisible()
+  await expect(form.getByText(/失败阶段：DNS 解析 · ENOTFOUND/)).toBeVisible()
+  await expect(page.getByText('PROVIDER_SECRET')).toHaveCount(0)
+  await page.evaluate(() => {
+    window.modelTest.response = {
+      error: {
+        code: 'list_unavailable',
+        message: 'PROVIDER_SECRET',
+        details: { stage: 'http', httpStatus: 405 },
+      },
+    }
+  })
+  await form.getByRole('button', { name: '获取模型', exact: true }).click()
+  await expect(form.getByText(/该地址不支持模型列表接口/)).toBeVisible()
+  await expect(form.getByText(/失败阶段：HTTP 响应 · HTTP 405/)).toBeVisible()
+  await expect(form.getByText(/ENOTFOUND/)).toHaveCount(0)
+  await form.getByLabel('模型名称', { exact: true }).fill('manual-model')
+  await expect(form.getByText(/失败阶段/)).toHaveCount(0)
+  await expect(form.getByRole('button', { name: '测试 API 连接', exact: true })).toBeEnabled()
+  await page.evaluate(() => {
+    window.modelTest.response = {
+      error: {
+        code: 'network',
+        message: 'PROVIDER_SECRET',
+        details: { stage: 'connect', networkCode: 'PROVIDER_SECRET', httpStatus: 12345 },
+      },
+    } as unknown as ModelDiagnosticResult
+  })
+  await form.getByRole('button', { name: '测试 API 连接', exact: true }).click()
+  await expect(form.getByText(/失败阶段：建立连接/)).toBeVisible()
+  await expect(page.getByText(/PROVIDER_SECRET|12345/)).toHaveCount(0)
+})

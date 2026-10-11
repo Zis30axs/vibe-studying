@@ -312,6 +312,13 @@ export function AgentWorkbench({
   }
   const running = snapshot.starting || snapshot.run?.status === 'running'
   const receiving = !!snapshot.pendingProposal
+  const answerUnavailableReason = receiving
+    ? '正在保存或丢弃预览，完成后可更改答卷快照选项。'
+    : !scopedQuestion
+      ? currentQuestion
+        ? `当前题目属于${subjectLabel[currentQuestion.subject]}，本次范围为${subjectLabel[subject]}。切换为${subjectLabel[currentQuestion.subject]}，或返回练习页选择${subjectLabel[subject]}题目后可附带答卷。`
+        : '当前没有选中的题目。请返回练习页选择一道题目后，再附带答卷快照。'
+      : ''
   const sendingAllowed =
     !!parentConfig?.configured &&
     parentConsent &&
@@ -578,10 +585,16 @@ export function AgentWorkbench({
               type="checkbox"
               checked={scopedAnswer}
               disabled={!scopedQuestion || receiving}
+              aria-describedby={answerUnavailableReason ? 'agent-answer-unavailable' : undefined}
               onChange={(event) => change(() => setIncludeAnswer(event.target.checked))}
             />
             附带当前答卷快照（正文、模块、绘图、数学参数）
           </label>
+          {answerUnavailableReason && (
+            <p id="agent-answer-unavailable" className="agent-muted">
+              {answerUnavailableReason}
+            </p>
+          )}
           {mode !== 'learner' && (
             <label className="agent-check">
               <input

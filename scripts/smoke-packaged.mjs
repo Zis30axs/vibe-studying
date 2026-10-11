@@ -203,6 +203,68 @@ try {
       { label: 'C', x: 0, y: 2, z: 6 },
     ],
   )
+  // Exercise the packaged Agent context controls without starting any model run.
+  const contextTitle = await page.locator('.question-prompt h2').innerText()
+  const contextId = await page.locator('.question-id').innerText()
+  const contextDraft = 'Packaged Agent context: preserve this independent math draft.'
+  await page.locator('#answer-text').fill(contextDraft)
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        async () => (await window.examcraft.loadState()).drafts['math-solution-1']?.text,
+      ),
+    )
+    .toBe(contextDraft)
+  const questionSearch = page.getByRole('textbox', { name: '搜索题目', exact: true })
+  await questionSearch.fill(contextTitle)
+  const navigation = page.getByRole('navigation', { name: '工作区导航' })
+  const agentNavigation = navigation.getByRole('button', {
+    name: 'Agent 工作台 Bounded tools',
+    exact: true,
+  })
+  const mathNavigation = navigation.getByRole('button', {
+    name: '数学工作台 Math lab',
+    exact: true,
+  })
+  await agentNavigation.click()
+  const agentSubject = page.getByRole('combobox', { name: '学科', exact: true })
+  const answerSnapshot = page.getByRole('checkbox', { name: /附带当前答卷快照/ })
+  await expect(agentSubject).toHaveValue('math')
+  await expect(page.locator('.agent-scope-summary')).toContainText(contextTitle)
+  await expect(answerSnapshot).toBeEnabled()
+  await expect(answerSnapshot).not.toBeChecked()
+  await agentSubject.selectOption('geography')
+  await expect(answerSnapshot).toBeDisabled()
+  await expect(answerSnapshot).not.toBeChecked()
+  await expect(page.locator('.agent-scope-summary')).not.toContainText(contextTitle)
+  await expect(page.locator('#agent-answer-unavailable')).toContainText('当前题目属于数学')
+  await agentSubject.selectOption('math')
+  await expect(answerSnapshot).toBeEnabled()
+  await expect(answerSnapshot).not.toBeChecked()
+  await page.getByRole('combobox', { name: '工作模式', exact: true }).selectOption('create')
+  await answerSnapshot.check()
+  await expect(answerSnapshot).toBeChecked()
+  await mathNavigation.click()
+  await expect(page.locator('.question-id')).toHaveText(contextId)
+  await expect(page.locator('#answer-text')).toHaveValue(contextDraft)
+  await expect(questionSearch).toHaveValue(contextTitle)
+  await agentNavigation.click()
+  await expect(answerSnapshot).not.toBeChecked()
+  await mathNavigation.click()
+  await questionSearch.fill('packaged-no-matching-question-043')
+  await expect(page.locator('.question-prompt')).toHaveCount(0)
+  await agentNavigation.click()
+  await expect(answerSnapshot).toBeDisabled()
+  await expect(answerSnapshot).not.toBeChecked()
+  await expect(page.locator('#agent-answer-unavailable')).toContainText('当前没有选中的题目')
+  await expect(page.locator('.agent-scope-summary')).not.toContainText(contextTitle)
+  await mathNavigation.click()
+  await expect(questionSearch).toHaveValue('packaged-no-matching-question-043')
+  await expect(page.locator('.question-prompt')).toHaveCount(0)
+  await page.getByRole('button', { name: '清除筛选', exact: true }).click()
+  await page.locator('.question-item').filter({ hasText: '解一元一次方程' }).click()
+  await expect(page.locator('#answer-text')).toHaveValue(contextDraft)
+  assert.deepEqual(await savedGeometry(), persistedGeometry)
   // Verify the offline catalog shipped in the ZIP, without configuring a model or sending API calls.
   const formula = {
     id: 'math.vector.dot',
@@ -367,10 +429,81 @@ try {
   await expect(geometry.getByTestId('geometry-face')).toHaveCount(1)
   await expect(geometry.getByLabel('三维点列表')).toContainText('C (0, 2, 6)')
   assert.deepEqual(await savedGeometry(), persistedGeometry)
+  await expect(page.locator('#answer-text')).toHaveValue(contextDraft)
+
+  // UI-only diagnostic mocks: replace just this test process's IPC handler before
+  // clicking diagnostics. No transport, DNS, TLS, endpoint or credential is used.
+  // Production transport classifications are covered separately by unit/CI tests.
+  const profilesBeforeDiagnostics = await page.evaluate(() => window.examcraft.getModelProfiles())
+  await page
+    .getByRole('navigation', { name: '工作区导航' })
+    .getByRole('button', { name: '题库与 Agent Connections', exact: true })
+    .click()
+  const settings = page.getByRole('region', { name: '模型设置', exact: true })
+  const diagnostics = settings.getByRole('region', { name: '模型连接诊断', exact: true })
+  await settings.getByLabel('接口基础地址', { exact: true }).fill('https://smoke.invalid/v1')
+  await settings.getByLabel('模型名称', { exact: true }).fill('synthetic-smoke-model')
+  await expect(settings.locator('input[type="password"]')).toHaveValue('')
+  for (const scenario of [
+    {
+      kind: 'list',
+      code: 'dns',
+      details: { stage: 'dns', networkCode: 'ENOTFOUND' },
+      expected: '失败阶段：DNS 解析 · ENOTFOUND',
+    },
+    {
+      kind: 'test',
+      code: 'tls',
+      details: { stage: 'tls', networkCode: 'CERT_HAS_EXPIRED' },
+      expected: '失败阶段：TLS 安全连接 · CERT_HAS_EXPIRED',
+    },
+    {
+      kind: 'list',
+      code: 'list_unavailable',
+      details: { stage: 'http', httpStatus: 405 },
+      expected: '失败阶段：HTTP 响应 · HTTP 405',
+    },
+  ]) {
+    await app.evaluate(({ ipcMain }, scenario) => {
+      ipcMain.removeHandler('examcraft:diagnose-model')
+      ipcMain.handle('examcraft:diagnose-model', (_event, input) => {
+        if (
+          input.kind !== scenario.kind ||
+          input.baseUrl !== 'https://smoke.invalid/v1' ||
+          input.model !== 'synthetic-smoke-model' ||
+          input.apiKey !== undefined
+        )
+          throw new Error('Unexpected synthetic diagnostic input')
+        return {
+          error: {
+            code: scenario.code,
+            message: 'SYNTHETIC_PROVIDER_PAYLOAD_NOT_FOR_UI',
+            details: { ...scenario.details, address: 'SYNTHETIC_PRIVATE_ADDRESS_NOT_FOR_UI' },
+          },
+        }
+      })
+    }, scenario)
+    await diagnostics
+      .getByRole('button', {
+        name: scenario.kind === 'list' ? '获取模型' : '测试 API 连接',
+        exact: true,
+      })
+      .click()
+    await expect(diagnostics.locator('.model-diagnostic-details')).toContainText(scenario.expected)
+    await expect(
+      page.getByText(/SYNTHETIC_PROVIDER_PAYLOAD_NOT_FOR_UI|SYNTHETIC_PRIVATE_ADDRESS_NOT_FOR_UI/),
+    ).toHaveCount(0)
+  }
+  await expect(diagnostics).not.toContainText('ENOTFOUND')
+  await expect(diagnostics).not.toContainText('CERT_HAS_EXPIRED')
+  assert.deepEqual(
+    await page.evaluate(() => window.examcraft.getModelProfiles()),
+    profilesBeforeDiagnostics,
+  )
   await expect(page.getByRole('alert')).toHaveCount(0)
   assert.deepEqual(errors, [])
   console.log(
-    `Packaged smoke passed: ${artifact}.zip; packaged mode, production protocol, feature panels, submit/history, perpendicular construction and editable xyz geometry, offline formula search/conditions/favorites, six-subject PDF package import/search/canvas, dedupe and restart persistence.`,
+    `Packaged smoke passed: ${artifact}.zip; packaged mode, production protocol, feature panels, submit/history, perpendicular construction and editable xyz geometry, Agent question scope and explicit snapshot opt-in, DNS/TLS/HTTP diagnostic display (UI-only IPC mocks), offline formula search/conditions/favorites, six-subject PDF package import/search/canvas, dedupe and restart persistence.`,
   )
 } finally {
   await app?.close()

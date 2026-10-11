@@ -1,3 +1,4 @@
+import { safeModelDebugModel, type ModelDebugCategory } from '../shared/model-debug'
 import { randomUUID } from 'node:crypto'
 import {
   generationRequestSchema,
@@ -256,9 +257,44 @@ export class ModelService {
       throw new Error('已有连接检查进行中，请等待或取消。')
     const controller = new AbortController()
     this.pending.set(id, controller)
+    const started = Date.now()
+    const debugId = randomUUID()
+    let debugModel = '[redacted]'
+    const recordDiagnostic = (error?: ModelDiagnosticError) => {
+      const category: ModelDebugCategory = !error
+        ? 'ok'
+        : ['auth', 'rate_limit', 'timeout', 'cancelled'].includes(error.code)
+          ? (error.code as ModelDebugCategory)
+          : error.details?.stage === 'http'
+            ? 'http'
+            : error.code === 'invalid_response' || error.code === 'incomplete_list'
+              ? 'envelope'
+              : 'network'
+      this.debug.record({
+        requestId: debugId,
+        protocol: parsed.protocol,
+        model: debugModel,
+        operation: parsed.kind === 'list' ? 'model_list' : 'connection_test',
+        stage:
+          error?.details?.stage === 'http'
+            ? 'http'
+            : error?.details?.stage === 'response' || !error
+              ? 'response'
+              : category === 'envelope'
+                ? 'envelope'
+                : 'request',
+        category,
+        elapsedMs: Date.now() - started,
+        ...(error?.details
+          ? { connection: error.details, httpStatus: error.details.httpStatus }
+          : {}),
+      })
+    }
     try {
       await this.queue
       const key = await this.profiles.diagnosticKey(parsed)
+      debugModel =
+        parsed.kind === 'list' ? 'models-endpoint' : safeModelDebugModel(parsed.model, key)
       if (controller.signal.aborted) throw new Error('请求已取消。')
       const options = {
         fetchImpl: this.options.fetchImpl,
@@ -275,10 +311,19 @@ export class ModelService {
         (await this.profiles.getConfig()).revision !== parsed.expectedRevision
       )
         throw new Error('设置已更改，旧连接检查结果已丢弃。')
+      recordDiagnostic()
       return result
     } catch (error) {
-      if (error instanceof ModelDiagnosticError)
-        return { error: { code: error.code, message: error.message } }
+      if (error instanceof ModelDiagnosticError) {
+        recordDiagnostic(error)
+        return {
+          error: {
+            code: error.code,
+            message: error.message,
+            ...(error.details ? { details: error.details } : {}),
+          },
+        }
+      }
       throw error
     } finally {
       this.pending.delete(id)

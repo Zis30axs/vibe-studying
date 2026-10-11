@@ -335,8 +335,10 @@ it.each([
   [400, 'model'],
   [422, 'model'],
   [429, 'rate_limit'],
-  [500, 'network'],
-  [302, 'network'],
+  [500, 'server'],
+  [502, 'server'],
+  [405, 'http'],
+  [302, 'redirect_blocked'],
 ])(
   'maps HTTP %s to a fixed %s error without reading or echoing provider details',
   async (status, code) => {
@@ -345,7 +347,10 @@ it.each([
     const fetchImpl = vi
       .fn<typeof fetch>()
       .mockResolvedValue(new Response(body, { status: Number(status) }))
-    await expect(testModelConnection(config(), key, { fetchImpl })).rejects.toMatchObject({ code })
+    await expect(testModelConnection(config(), key, { fetchImpl })).rejects.toMatchObject({
+      code,
+      details: { stage: 'http', httpStatus: status },
+    })
     expect(cancel).toHaveBeenCalledOnce()
   },
 )
@@ -363,7 +368,7 @@ it('maps thrown provider/network errors without echoing secrets and rejects redi
     testModelConnection(config(), key, {
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(redirected),
     }),
-  ).rejects.toMatchObject({ code: 'network' })
+  ).rejects.toMatchObject({ code: 'redirect_blocked', details: { stage: 'http', httpStatus: 200 } })
 })
 
 it.each([listRemoteModels, testModelConnection])(
@@ -545,4 +550,125 @@ it('uses HTTPS GET without a body and retains DNS checks in the production trans
     done(null, [{ address: '8.8.8.8', family: 4 }])) as typeof lookup)
   actualOptions.lookup('api.vendor.com', { all: true }, callback)
   expect(callback).toHaveBeenLastCalledWith(null, [{ address: '8.8.8.8', family: 4 }])
+})
+
+it.each([
+  ['ENOTFOUND', 'dns', 'dns'],
+  ['EAI_AGAIN', 'dns', 'dns'],
+  ['ECONNREFUSED', 'network', 'connect'],
+  ['ECONNRESET', 'network', 'connect'],
+  ['ETIMEDOUT', 'timeout', 'connect'],
+  ['CERT_HAS_EXPIRED', 'tls', 'tls'],
+  ['ERR_TLS_CERT_ALTNAME_INVALID', 'tls', 'tls'],
+  ['SELF_SIGNED_CERT_IN_CHAIN', 'tls', 'tls'],
+  ['ENDPOINT_NOT_PUBLIC', 'endpoint_blocked', 'security'],
+])(
+  'preserves only allowlisted %s diagnostic metadata and never arbitrary errors',
+  async (networkCode, code, stage) => {
+    const cause = Object.assign(new Error(`Authorization: Bearer ${key}`), {
+      code: networkCode,
+      hostname: key,
+    })
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockRejectedValue(new AggregateError([new Error('outer', { cause })], key))
+    const result = await listRemoteModels({ ...config(), model: '' }, key, { fetchImpl }).catch(
+      (error: unknown) => error,
+    )
+    expect(result).toMatchObject({ code, details: { stage, networkCode } })
+    expect(JSON.stringify(result)).not.toContain(key)
+    expect(fetchImpl).toHaveBeenCalledOnce()
+  },
+)
+
+it('omits unknown network codes rather than leaking them or guessing from error messages', async () => {
+  const error = Object.assign(new Error(`ENOTFOUND ${key}`), { code: key })
+  const result = await listRemoteModels(config(), key, {
+    fetchImpl: vi.fn<typeof fetch>().mockRejectedValue(error),
+  }).catch((error: unknown) => error)
+  expect(result).toMatchObject({ code: 'network', details: { stage: 'connect' } })
+  expect(JSON.stringify(result)).not.toContain(key)
+  expect((result as ModelDiagnosticError).details).not.toHaveProperty('networkCode')
+})
+
+it.each([404, 405, 501])(
+  'treats list HTTP %s as an unavailable list, not a failed model or network',
+  async (status) => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(key, { status }))
+    const result = await listRemoteModels(
+      { ...config(), baseUrl: 'https://custom.vendor.com/v1/', model: '' },
+      key,
+      { fetchImpl },
+    ).catch((error: unknown) => error)
+    expect(result).toMatchObject({
+      code: 'list_unavailable',
+      details: { stage: 'http', httpStatus: status },
+    })
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://custom.vendor.com/v1/models')
+    expect(JSON.stringify(result)).not.toContain(key)
+  },
+)
+
+it.each([
+  ['ENOTFOUND', [], 'dns', 'ENOTFOUND'],
+  [null, [], 'dns', 'DNS_NO_ADDRESS'],
+  [null, [{ address: '198.18.0.2', family: 4 }], 'endpoint_blocked', 'ENDPOINT_NOT_PUBLIC'],
+  [null, [{ address: '127.0.0.1', family: 4 }], 'endpoint_blocked', 'ENDPOINT_NOT_PUBLIC'],
+])(
+  'preserves DNS and safety failures through the actual HTTPS lookup: %s %j',
+  async (lookupCode, addresses, code, networkCode) => {
+    vi.mocked(lookup).mockImplementation(((_host: string, _options: unknown, done: Function) =>
+      done(
+        lookupCode ? Object.assign(new Error(key), { code: lookupCode }) : null,
+        addresses,
+      )) as typeof lookup)
+    vi.mocked(request).mockImplementation(((_url: unknown, options: any) => {
+      const req = new EventEmitter() as EventEmitter & { end: () => void }
+      req.end = () =>
+        options.lookup('custom.vendor.com', { all: true }, (error: Error) =>
+          req.emit('error', error),
+        )
+      return req
+    }) as unknown as typeof request)
+    const result = await listRemoteModels(
+      { ...config(), baseUrl: 'https://custom.vendor.com/v1', model: '' },
+      key,
+    ).catch((error: unknown) => error)
+    expect(result).toMatchObject({ code, details: { networkCode } })
+    expect(JSON.stringify(result)).not.toContain(key)
+  },
+)
+
+it.each([204, 205, 304])('preserves bodyless HTTP %s in production transport', async (status) => {
+  vi.mocked(request).mockImplementation(((
+    _url: unknown,
+    _options: unknown,
+    callback: (value: unknown) => void,
+  ) => {
+    const req = new EventEmitter() as EventEmitter & { end: () => void }
+    req.end = () => callback(Object.assign(Readable.from([]), { statusCode: status, headers: {} }))
+    return req
+  }) as unknown as typeof request)
+  const result = await listRemoteModels(config(), key).catch((error: unknown) => error)
+  expect(result).toMatchObject({
+    code: status === 304 ? 'redirect_blocked' : 'invalid_response',
+    details: { httpStatus: status },
+  })
+})
+
+it('distinguishes a dropped response body from a connection that never received HTTP headers', async () => {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.error(Object.assign(new Error(key), { code: 'ECONNRESET' }))
+    },
+  })
+  const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(body, { status: 200 }))
+  const result = await listRemoteModels(config(), key, { fetchImpl }).catch(
+    (error: unknown) => error,
+  )
+  expect(result).toMatchObject({
+    code: 'response_interrupted',
+    details: { stage: 'response', networkCode: 'ECONNRESET', httpStatus: 200 },
+  })
+  expect(JSON.stringify(result)).not.toContain(key)
 })

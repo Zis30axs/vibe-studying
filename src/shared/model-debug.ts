@@ -1,3 +1,7 @@
+import {
+  sanitizeConnectionDetails,
+  type ModelConnectionDetails,
+} from './model-connection-diagnostics'
 import type { ModelProtocol } from './types'
 
 export const MODEL_DEBUG_LIMIT = 80
@@ -39,6 +43,8 @@ export interface ModelDebugEvent extends ModelDebugContext {
   protocol: ModelProtocol
   model: string
   httpStatus?: number
+  operation?: 'model_list' | 'connection_test'
+  connection?: ModelConnectionDetails
   schemaPaths?: string[]
 }
 export interface ModelDebugRecord extends ModelDebugEvent {
@@ -189,6 +195,7 @@ export function sanitizeModelDebugEvent(input: ModelDebugEvent): ModelDebugEvent
         return safeModelDebugPaths([parts.map((part) => (part === '[*]' ? 0 : part))])[0]
       })
     : undefined
+  const connection = sanitizeConnectionDetails(input.connection)
   return {
     requestId: input.requestId,
     stage: input.stage,
@@ -198,6 +205,10 @@ export function sanitizeModelDebugEvent(input: ModelDebugEvent): ModelDebugEvent
       : 0,
     protocol: input.protocol,
     model: safeModelDebugModel(input.model),
+    ...(input.operation === 'model_list' || input.operation === 'connection_test'
+      ? { operation: input.operation }
+      : {}),
+    ...(connection ? { connection } : {}),
     ...(Number.isInteger(input.httpStatus) && input.httpStatus! >= 100 && input.httpStatus! <= 599
       ? { httpStatus: input.httpStatus }
       : {}),

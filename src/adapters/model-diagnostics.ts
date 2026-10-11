@@ -1,4 +1,9 @@
 import { z } from 'zod'
+import {
+  safeConnectionCode,
+  sanitizeConnectionDetails,
+  type ModelConnectionDetails,
+} from '../shared/model-connection-diagnostics'
 import type { ModelProtocol } from '../shared/types'
 import {
   ModelTransportError,
@@ -27,7 +32,18 @@ const messages = {
   model: '服务不接受当前模型或请求参数，请检查 Model ID 和所选协议。',
   rate_limit: '请求受限或额度不足，请稍后重试或检查服务额度。',
   timeout: '模型请求超时，请稍后重试。',
-  network: '无法连接模型服务，请检查网络和 Base URL。',
+  network: '无法连接模型服务，未收到有效 HTTP 响应。请检查网络和 Base URL。',
+  response_interrupted: '已收到服务响应，但读取过程中连接中断。请检查网络或代理后重试。',
+  dns: '无法解析服务域名，请检查 Base URL 的拼写和本机 DNS。',
+  tls: 'TLS 安全连接失败，请检查系统时间、证书和网络代理；应用不会跳过证书验证。',
+  endpoint_blocked:
+    '域名解析到了非公网地址，已在发送前拦截。请检查本机 DNS 或代理是否启用了 Fake IP；应用仅连接公网 HTTPS 服务。',
+  redirect_blocked:
+    '接口返回了重定向，已停止请求以避免将密钥转发到其他地址。请使用服务商提供的最终 API Base URL。',
+  server: '已连接到服务，但服务返回了服务器错误。请稍后重试或联系服务商。',
+  http: '服务已响应，但拒绝了请求。请核对 Base URL 和所选协议。',
+  list_unavailable:
+    '该地址不支持模型列表接口。请核对 Base URL；也可手动填写模型名称，再测试 API 连接。',
   invalid_response: '服务返回格式无效或未生成有效响应，请检查所选协议。',
   cancelled: '请求已取消。',
   invalid_config: '模型配置无效，请检查公开 HTTPS Base URL、协议和 Model ID。',
@@ -36,8 +52,13 @@ const messages = {
 export type ModelDiagnosticErrorCode = keyof typeof messages
 /** Only these fixed messages, never provider errors, are safe to display to the renderer. */
 export class ModelDiagnosticError extends ModelTransportError {
-  constructor(readonly code: ModelDiagnosticErrorCode) {
-    super(messages[code])
+  readonly details?: ModelConnectionDetails
+  constructor(
+    readonly code: ModelDiagnosticErrorCode,
+    details?: ModelConnectionDetails,
+  ) {
+    super(messages[code], code)
+    this.details = sanitizeConnectionDetails(details)
     this.name = 'ModelDiagnosticError'
   }
 }
@@ -140,37 +161,101 @@ async function boundedJson(response: Response, signal: AbortSignal, key: string)
   }
 }
 
+/** Read only fixed code values, including bounded Node fetch causes / AggregateErrors. */
+function connectionFailure(error: unknown): ModelDiagnosticError {
+  const pending: unknown[] = [error]
+  const seen = new Set<unknown>()
+  for (let count = 0; pending.length && count < 12; count++) {
+    const value = pending.shift()
+    if (!value || typeof value !== 'object' || seen.has(value)) continue
+    seen.add(value)
+    const item = value as { code?: unknown; cause?: unknown; errors?: unknown }
+    const code = safeConnectionCode(item.code)
+    if (code) {
+      if (
+        ['ENOTFOUND', 'EAI_AGAIN', 'EAI_FAIL', 'DNS_LOOKUP_FAILED', 'DNS_NO_ADDRESS'].includes(code)
+      )
+        return new ModelDiagnosticError('dns', { stage: 'dns', networkCode: code })
+      if (code === 'ENDPOINT_NOT_PUBLIC')
+        return new ModelDiagnosticError('endpoint_blocked', {
+          stage: 'security',
+          networkCode: code,
+        })
+      if (code === 'INVALID_HTTP_RESPONSE')
+        return new ModelDiagnosticError('invalid_response', {
+          stage: 'response',
+          networkCode: code,
+        })
+      if (/^(ERR_TLS_|ERR_SSL_|CERT_|UNABLE_TO_|DEPTH_|SELF_SIGNED_)/.test(code))
+        return new ModelDiagnosticError('tls', { stage: 'tls', networkCode: code })
+      return new ModelDiagnosticError(code === 'ETIMEDOUT' ? 'timeout' : 'network', {
+        stage: 'connect',
+        networkCode: code,
+      })
+    }
+    pending.push(item.cause)
+    if (Array.isArray(item.errors)) pending.push(...item.errors.slice(0, 6))
+  }
+  return new ModelDiagnosticError('network', { stage: 'connect' })
+}
+
 async function requestJson(
   url: string,
   init: RequestInit,
   key: string,
   fetchImpl: typeof fetch,
   signal: AbortSignal,
+  kind: 'list' | 'test' = 'test',
 ): Promise<unknown> {
   if (signal.aborted) throw new ModelDiagnosticError('cancelled')
   let response: Response
   try {
     response = await fetchImpl(url, { ...init, redirect: 'error', signal })
-  } catch {
-    throw new ModelDiagnosticError('network')
+  } catch (error) {
+    if (signal.aborted) throw new ModelDiagnosticError('cancelled')
+    throw connectionFailure(error)
   }
   if (signal.aborted || response.redirected || !response.ok) {
     void response.body?.cancel().catch(() => {})
     if (signal.aborted) throw new ModelDiagnosticError('cancelled')
     if (response.redirected || (response.status >= 300 && response.status < 400))
-      throw new ModelDiagnosticError('network')
+      throw new ModelDiagnosticError('redirect_blocked', {
+        stage: 'http',
+        httpStatus: response.status,
+      })
     const code = [401, 403].includes(response.status)
       ? 'auth'
-      : response.status === 404
-        ? 'not_found'
-        : response.status === 429
-          ? 'rate_limit'
-          : [400, 422].includes(response.status)
-            ? 'model'
-            : 'network'
-    throw new ModelDiagnosticError(code)
+      : kind === 'list' && [404, 405, 501].includes(response.status)
+        ? 'list_unavailable'
+        : response.status === 404
+          ? 'not_found'
+          : response.status === 429
+            ? 'rate_limit'
+            : [400, 422].includes(response.status)
+              ? kind === 'list'
+                ? 'http'
+                : 'model'
+              : response.status >= 500
+                ? 'server'
+                : 'http'
+    throw new ModelDiagnosticError(code, { stage: 'http', httpStatus: response.status })
   }
-  return boundedJson(response, signal, key)
+  try {
+    return await boundedJson(response, signal, key)
+  } catch (error) {
+    if (error instanceof ModelDiagnosticError && error.code === 'cancelled') throw error
+    const failure = connectionFailure(error)
+    if (failure.details?.networkCode)
+      throw new ModelDiagnosticError('response_interrupted', {
+        stage: 'response',
+        networkCode: failure.details.networkCode,
+        httpStatus: response.status,
+      })
+    throw new ModelDiagnosticError('invalid_response', {
+      stage: 'response',
+      httpStatus: response.status,
+    })
+  }
 }
 
 /** A single deadline covers every page as well as stalled fetches and response bodies. */
@@ -238,6 +323,7 @@ export async function listRemoteModels(
         key,
         options.fetchImpl ?? secureFetch,
         signal,
+        'list',
       )
       let entries: RemoteModel[]
       let next: string | undefined

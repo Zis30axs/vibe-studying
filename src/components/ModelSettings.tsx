@@ -1,3 +1,8 @@
+import {
+  connectionStageLabels,
+  sanitizeConnectionDetails,
+  type ModelConnectionDetails,
+} from '../shared/model-connection-diagnostics'
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import type {
   ExamCraftApi,
@@ -36,7 +41,18 @@ const diagnosticErrors: Record<string, string> = {
   model: '服务不接受当前模型或请求参数，请检查模型名称和所选协议。',
   rate_limit: '请求受限或额度不足，请稍后重试或检查服务额度。',
   timeout: '模型请求超时，请稍后重试。',
-  network: '无法连接模型服务，请检查网络和接口地址。',
+  network: '无法连接模型服务，未收到有效 HTTP 响应。请检查网络和接口地址。',
+  response_interrupted: '已收到服务响应，但读取过程中连接中断。请检查网络或代理后重试。',
+  dns: '无法解析服务域名，请检查接口地址的拼写和本机 DNS。',
+  tls: 'TLS 安全连接失败，请检查系统时间、证书和网络代理；应用不会跳过证书验证。',
+  endpoint_blocked:
+    '域名解析到了非公网地址，已在发送前拦截。请检查本机 DNS 或代理是否启用了 Fake IP；应用仅连接公网 HTTPS 服务。',
+  redirect_blocked:
+    '接口返回了重定向，已停止请求以避免将密钥转发到其他地址。请使用服务商提供的最终 API 地址。',
+  server: '已连接到服务，但服务返回了服务器错误。请稍后重试或联系服务商。',
+  http: '服务已响应，但拒绝了请求。请核对接口地址和所选协议。',
+  list_unavailable:
+    '该地址不支持模型列表接口。请核对接口地址；也可手动填写模型名称，再测试 API 连接。',
   invalid_response: '服务返回格式无效，请检查所选协议。',
   cancelled: '请求已取消。',
   invalid_config: '模型配置无效，请检查公开 HTTPS 接口地址、协议和模型名称。',
@@ -109,6 +125,7 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null)
   const [diagnostic, setDiagnostic] = useState<'list' | 'test' | null>(null)
   const [diagnosticMessage, setDiagnosticMessage] = useState('')
+  const [diagnosticDetails, setDiagnosticDetails] = useState<ModelConnectionDetails>()
   const [models, setModels] = useState<{ id: string; name?: string }[]>([])
   const [modelSearch, setModelSearch] = useState('')
   const mounted = useRef(true)
@@ -145,6 +162,7 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
     setDiagnostic(null)
     if (clearResults) {
       setDiagnosticMessage('')
+      setDiagnosticDetails(undefined)
       setModels([])
       setModelSearch('')
     }
@@ -351,6 +369,7 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
     diagnosticRequest.current = requestId
     setDiagnostic(kind)
     setDiagnosticMessage('')
+    setDiagnosticDetails(undefined)
     setModels([])
     setModelSearch('')
     try {
@@ -371,6 +390,7 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
       )
         return
       if (result.error) {
+        setDiagnosticDetails(sanitizeConnectionDetails(result.error.details))
         setDiagnosticMessage(
           diagnosticErrors[result.error.code] ?? '诊断未完成，请检查配置后重试。',
         )
@@ -600,6 +620,10 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
               仅点击时联网，使用上方当前填写的配置与密钥。获取模型会读取服务商模型列表；连接测试会发送一条极短的固定测试内容，可能产生少量
               API 费用，不会发送题目、答案或学习记录，也不会自动保存配置。
             </p>
+            <p className="advisor-muted">
+              获取模型不需要先填写模型名称，会请求接口地址下的
+              /models。列表不可用时，可以手动填写模型名称再测试。
+            </p>
             <div className="model-profile-actions">
               <button
                 type="button"
@@ -638,6 +662,18 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
             {diagnosticMessage && (
               <p className="advisor-muted" aria-live="polite">
                 {diagnosticMessage}
+                {diagnosticDetails && (
+                  <span className="model-diagnostic-details" style={{ display: 'block' }}>
+                    失败阶段：{connectionStageLabels[diagnosticDetails.stage]}
+                    {diagnosticDetails.networkCode ? ` · ${diagnosticDetails.networkCode}` : ''}
+                    {diagnosticDetails.httpStatus ? ` · HTTP ${diagnosticDetails.httpStatus}` : ''}
+                    {['dns', 'connect', 'tls', 'security'].includes(diagnosticDetails.stage) && (
+                      <span style={{ display: 'block' }}>
+                        当前桌面连接不会自动采用浏览器或系统代理设置。
+                      </span>
+                    )}
+                  </span>
+                )}
               </p>
             )}
             {models.length > 0 && (

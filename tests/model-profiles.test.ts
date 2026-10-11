@@ -1087,3 +1087,40 @@ it('accepts opaque OS ciphertext even when its base64 alphabet coincidentally in
     { configured: true, keyStatus: 'saved' },
   )
 })
+
+it('records safe model-list and connection diagnostics only when Debug is enabled', async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockRejectedValue(
+      Object.assign(new Error(parentKey), { code: 'ENOTFOUND', hostname: parentKey }),
+    )
+  const { models } = await setup({ secureStorage: secureStorage(), fetchImpl: fetcher })
+  const { state } = await twoProfiles(models)
+  const result = await models.diagnoseModel(diagnosticInput(state, { model: '' }))
+  expect(result).toMatchObject({
+    error: { code: 'dns', details: { stage: 'dns', networkCode: 'ENOTFOUND' } },
+  })
+  expect(models.getModelDebug().records).toEqual([])
+  models.setModelDebugEnabled(true)
+  await models.diagnoseModel(diagnosticInput(state, { model: '' }))
+  expect(models.getModelDebug().records).toMatchObject([
+    {
+      operation: 'model_list',
+      stage: 'request',
+      category: 'network',
+      connection: { stage: 'dns', networkCode: 'ENOTFOUND' },
+    },
+  ])
+  fetcher.mockResolvedValueOnce(new Response(parentKey, { status: 503 }))
+  await models.diagnoseModel(diagnosticInput(state, { kind: 'test' }))
+  expect(models.getModelDebug().records[1]).toMatchObject({
+    operation: 'connection_test',
+    stage: 'http',
+    category: 'http',
+    httpStatus: 503,
+  })
+  expect(models.modelDebugText()).not.toContain(parentKey)
+  expect(models.modelDebugText()).not.toContain('vendor.com')
+  models.setModelDebugEnabled(false)
+  expect(models.getModelDebug().records).toEqual([])
+})

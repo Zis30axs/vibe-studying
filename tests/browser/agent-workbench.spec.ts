@@ -221,6 +221,9 @@ test('full preview requires explicit acceptance; repeated clicks dispatch once',
     ;(element as HTMLButtonElement).click()
   })
   await expect(page.getByRole('button', { name: '正在处理…', exact: true })).toBeDisabled()
+  await expect(page.locator('#agent-answer-unavailable')).toHaveText(
+    '正在保存或丢弃预览，完成后可更改答卷快照选项。',
+  )
   expect(await page.evaluate(() => window.agentFixture.accepts)).toBe(1)
   expect(await page.evaluate(() => window.agentFixture.applies)).toBe(0)
   await page.evaluate(() => window.agentFixture.releaseAccept?.())

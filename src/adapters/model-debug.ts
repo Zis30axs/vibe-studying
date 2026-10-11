@@ -18,6 +18,7 @@ export class ModelDebugStore {
       limit: MODEL_DEBUG_LIMIT,
       records: this.records.map((record) => ({
         ...record,
+        ...(record.connection ? { connection: { ...record.connection } } : {}),
         ...(record.schemaPaths ? { schemaPaths: [...record.schemaPaths] } : {}),
       })),
     }

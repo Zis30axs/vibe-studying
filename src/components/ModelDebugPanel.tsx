@@ -1,3 +1,4 @@
+import { connectionStageLabels } from '../shared/model-connection-diagnostics'
 import { useEffect, useRef, useState } from 'react'
 import type {
   ModelDebugApi,
@@ -105,12 +106,12 @@ export function ModelDebugPanel({ api }: { api: ModelDebugApi }) {
       <h3 id="model-debug-title">Debug · 本地脱敏诊断</h3>
       <p className="model-key-status">
         默认关闭，仅保留本次应用会话最近 {state?.limit ?? 80} 条记录，关闭或退出应用即清除。
-        只记录阶段、耗时、HTTP 状态、协议、模型和字段位置，不记录 API
+        只记录阶段、固定网络错误码、耗时、HTTP 状态、协议、模型和字段位置，不记录 API
         Key、请求或响应原文、作答与教材正文。
       </p>
       <p className="model-key-status">
-        覆盖提交作答、顾问提示、模块检查和生成题目的模型请求。连接测试和模型列表不在此记录。 开启
-        Debug 不会发起请求、自动重试或上传日志。
+        覆盖提交作答、顾问提示、模块检查、生成题目、连接测试和获取模型列表。开启 Debug
+        不会发起请求、自动重试或上传日志。
       </p>
       <label>
         <input
@@ -157,12 +158,23 @@ export function ModelDebugPanel({ api }: { api: ModelDebugApi }) {
               style={{ marginBottom: 12, fontSize: 12, lineHeight: 1.7, overflowWrap: 'anywhere' }}
             >
               <strong>
+                {record.operation === 'model_list'
+                  ? '获取模型 · '
+                  : record.operation === 'connection_test'
+                    ? '连接测试 · '
+                    : ''}
                 {stageLabels[record.stage]} · {categoryLabels[record.category]}
               </strong>
               <div>
                 {record.protocol} · {record.model} · {record.elapsedMs} ms
                 {record.httpStatus ? ` · HTTP ${record.httpStatus}` : ''}
               </div>
+              {record.connection && (
+                <div>
+                  {connectionStageLabels[record.connection.stage]}
+                  {record.connection.networkCode ? ` · ${record.connection.networkCode}` : ''}
+                </div>
+              )}
               {record.schemaPaths?.length ? (
                 <div>字段位置：{record.schemaPaths.join('、')}</div>
               ) : null}

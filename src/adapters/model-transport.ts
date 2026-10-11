@@ -1,3 +1,4 @@
+import { safeConnectionCode } from '../shared/model-connection-diagnostics'
 import { containsCredentialText } from './credential-reflection'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
@@ -75,7 +76,12 @@ export const secureFetch: typeof fetch = async (input, init) =>
         lookup: (hostname, options, callback) =>
           lookup(hostname, { all: true }, (error, addresses) => {
             if (error || !addresses.length || addresses.some((a) => !isPublicAddress(a.address))) {
-              callback(new Error('Endpoint unavailable'), [], undefined)
+              const code = error
+                ? (safeConnectionCode(error.code) ?? 'DNS_LOOKUP_FAILED')
+                : !addresses.length
+                  ? 'DNS_NO_ADDRESS'
+                  : 'ENDPOINT_NOT_PUBLIC'
+              callback(Object.assign(new Error('Endpoint unavailable'), { code }), [], undefined)
               return
             }
             if (options.all) callback(null, addresses)
@@ -87,15 +93,23 @@ export const secureFetch: typeof fetch = async (input, init) =>
           const headers = new Headers()
           for (const [key, value] of Object.entries(response.headers))
             if (value) headers.set(key, Array.isArray(value) ? value.join(', ') : value)
+          if ([204, 205, 304].includes(response.statusCode ?? 0)) response.resume()
           resolve(
-            new Response(Readable.toWeb(response) as ReadableStream<Uint8Array>, {
-              status: response.statusCode ?? 500,
-              headers,
-            }),
+            new Response(
+              [204, 205, 304].includes(response.statusCode ?? 0)
+                ? null
+                : (Readable.toWeb(response) as ReadableStream<Uint8Array>),
+              {
+                status: response.statusCode ?? 500,
+                headers,
+              },
+            ),
           )
         } catch {
           response.destroy()
-          reject(new Error('Invalid HTTP response'))
+          reject(
+            Object.assign(new Error('Invalid HTTP response'), { code: 'INVALID_HTTP_RESPONSE' }),
+          )
         }
       },
     )

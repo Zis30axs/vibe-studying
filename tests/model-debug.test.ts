@@ -456,3 +456,25 @@ describe('schema diagnostics retain no model-written grading data', () => {
     expect(store.copyText()).not.toContain(marker)
   })
 })
+
+it('allowlists and clones connection metadata at every Debug boundary', () => {
+  const store = new ModelDebugStore()
+  store.setEnabled(true)
+  store.record({
+    ...event,
+    operation: 'model_list',
+    connection: { stage: 'dns', networkCode: key, httpStatus: 9999, message: key, url: key },
+  } as unknown as ModelDebugEvent)
+  expect(store.getState().records[0].connection).toEqual({ stage: 'dns' })
+  const copy = store.getState()
+  copy.records[0].connection!.stage = 'http'
+  expect(store.getState().records[0].connection!.stage).toBe('dns')
+  expect(store.copyText()).not.toContain(key)
+  store.record({
+    ...event,
+    operation: key,
+    connection: { stage: key, networkCode: 'ENOTFOUND' },
+  } as unknown as ModelDebugEvent)
+  expect(store.getState().records[1]).not.toHaveProperty('operation')
+  expect(store.getState().records[1]).not.toHaveProperty('connection')
+})
