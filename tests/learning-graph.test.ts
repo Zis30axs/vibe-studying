@@ -508,81 +508,94 @@ it('explicit restore preserves pending typed work as a checkpoint and creates a 
   expect(restored.lineageId).not.toBe(original.lineageId)
   expect((await service.loadState()).drafts['pol-assembly-1'].text).toBe('起点')
 })
-it('module proposals merge only the host-validated saved suggestion and ignore arbitrary renderer edits', async () => {
-  const { graph, service } = await setup()
-  const draft = {
-    ...emptyDraft(),
-    text: '最终正文保持不变',
-    argument: {
-      version: 1 as const,
-      roots: [{ id: 'node1', kind: 'analysis' as const, text: '旧内容', children: [] }],
-    },
-  }
-  await service.saveDraft('pol-assembly-1', draft)
-  const coordinator = new LearningHelpCoordinator(service)
-  const result = {
-    requestId: 'module-request',
-    configRevision: 1,
-    summary: '一处修改',
-    confirmations: [],
-    suggestions: [
-      {
-        id: 'suggestion1',
-        moduleId: 'node1',
-        priority: 'optional' as const,
-        reason: '局部证据',
-        evidence: '材料支持',
-        edit: {
-          operation: 'replace' as const,
-          baseText: '旧内容',
-          start: 0,
-          end: 3,
-          expectedText: '旧内容',
-          replacement: '新内容',
-        },
+it.each(['suggestion1', 'constructor', 'prototype'])(
+  'module proposals merge only the saved suggestion %s and ignore arbitrary renderer edits',
+  async (suggestionId) => {
+    const { graph, service } = await setup()
+    const draft = {
+      ...emptyDraft(),
+      text: '最终正文保持不变',
+      argument: {
+        version: 1 as const,
+        roots: [{ id: 'node1', kind: 'analysis' as const, text: '旧内容', children: [] }],
       },
-    ],
-  }
-  await coordinator.run(
-    {
+    }
+    await service.saveDraft('pol-assembly-1', draft)
+    const coordinator = new LearningHelpCoordinator(service)
+    const result = {
       requestId: 'module-request',
-      questionId: 'pol-assembly-1',
-      kind: 'module-review',
-      draft,
-      prompt: '检查模块',
-    },
-    async () => result,
-    (response) => response.summary,
-  )
-  await expect(
-    coordinator.acceptModule({
+      configRevision: 1,
+      summary: '一处修改',
+      confirmations: [],
+      suggestions: [
+        {
+          id: suggestionId,
+          moduleId: 'node1',
+          priority: 'optional' as const,
+          reason: '局部证据',
+          evidence: '材料支持',
+          edit: {
+            operation: 'replace' as const,
+            baseText: '旧内容',
+            start: 0,
+            end: 3,
+            expectedText: '旧内容',
+            replacement: '新内容',
+          },
+        },
+      ],
+    }
+    await coordinator.run(
+      {
+        requestId: 'module-request',
+        questionId: 'pol-assembly-1',
+        kind: 'module-review',
+        draft,
+        prompt: '检查模块',
+      },
+      async () => result,
+      (response) => response.summary,
+    )
+    await expect(
+      coordinator.acceptModule({
+        requestId: result.requestId,
+        suggestionId: 'invented',
+        expectedDraft: draft,
+      }),
+    ).rejects.toThrow()
+    await expect(
+      coordinator.acceptModule({ requestId: 'constructor', suggestionId, expectedDraft: draft }),
+    ).rejects.toThrow()
+    await expect(
+      coordinator.acceptModule({
+        requestId: result.requestId,
+        suggestionId: '__proto__',
+        expectedDraft: draft,
+      }),
+    ).rejects.toThrow()
+    const accepted = await coordinator.acceptModule({
       requestId: result.requestId,
-      suggestionId: 'invented',
+      suggestionId,
       expectedDraft: draft,
-    }),
-  ).rejects.toThrow()
-  const accepted = await coordinator.acceptModule({
-    requestId: result.requestId,
-    suggestionId: 'suggestion1',
-    expectedDraft: draft,
-  })
-  expect(accepted.argument?.roots[0].text).toBe('新内容')
-  expect(accepted.text).toBe(draft.text)
-  expect((await service.loadState()).drafts['pol-assembly-1'].argument?.roots[0].text).toBe(
-    '新内容',
-  )
-  const stored = await graph.load()
-  expect(learningAssistance(stored, stored.heads['politics:pol-assembly-1']).status).toBe(
-    'adopted-ai',
-  )
-  await expect(
-    coordinator.acceptModule({
-      requestId: result.requestId,
-      suggestionId: 'suggestion1',
-      expectedDraft: draft,
-    }),
-  ).rejects.toThrow()
-})
+    })
+    expect(accepted.argument?.roots[0].text).toBe('新内容')
+    expect(accepted.text).toBe(draft.text)
+    expect((await service.loadState()).drafts['pol-assembly-1'].argument?.roots[0].text).toBe(
+      '新内容',
+    )
+    const stored = await graph.load()
+    expect(learningAssistance(stored, stored.heads['politics:pol-assembly-1']).status).toBe(
+      'adopted-ai',
+    )
+    await expect(
+      coordinator.acceptModule({
+        requestId: result.requestId,
+        suggestionId,
+        expectedDraft: draft,
+      }),
+    ).rejects.toThrow()
+  },
+)
 it('existing stored draft without graph migrates as unknown, never inferred independent', async () => {
   const { bank, dir, graph } = await setup()
   const old = new StudyService(dir, bank, new LocalRuleAgent())

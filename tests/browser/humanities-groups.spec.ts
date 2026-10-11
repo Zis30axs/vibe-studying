@@ -25,8 +25,7 @@ async function openFixture(page: Page) {
       window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => type => type; window.__vite_plugin_react_preamble_installed__ = true;
     </script>
     <script type="module">
-      import React, { useState } from '/node_modules/.vite/deps/react.js';
-      import { createRoot } from '/node_modules/.vite/deps/react-dom_client.js';
+      import React, { useState, createRoot } from '/tests/browser/fixtures/react.ts';
       import { HumanitiesComposer } from '/src/components/HumanitiesComposer.tsx';
       import '/src/styles.css'; import '/src/components/politics.css'; import '/src/components/argument-timeline.css'; import '/src/components/module-review.css';
       const h = React.createElement;

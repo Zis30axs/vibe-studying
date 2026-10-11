@@ -289,8 +289,8 @@ test('four humanities subjects offer structure templates, isolate drafts and ret
       await expect(toggle).toHaveAttribute('aria-expanded', 'true')
       const drawing = page.getByRole('region', { name: '地理绘图工作台', exact: true })
       await drawing.getByLabel('点标记', { exact: true }).fill('A')
-      await drawing.getByLabel('X 坐标', { exact: true }).fill('1')
-      await drawing.getByLabel('Y 坐标', { exact: true }).fill('2')
+      await drawing.getByLabel('经度', { exact: true }).fill('1')
+      await drawing.getByLabel('纬度', { exact: true }).fill('2')
       await drawing.getByRole('button', { name: '添加点', exact: true }).click()
       await expect(drawing.getByText('1 个点 · 0 条线', { exact: true })).toBeVisible()
     }

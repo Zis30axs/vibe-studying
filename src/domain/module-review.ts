@@ -10,6 +10,9 @@ import type {
 } from '../shared/types'
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/)
+// Model suggestion IDs are opaque array keys, including names such as
+// "constructor". They are not persisted graph/entity identifiers.
+export const moduleReviewSuggestionIdSchema = id
 const offset = z.number().int().min(0).max(MAX_ARGUMENT_TEXT_LENGTH)
 const spanSchema = z.strictObject({
   moduleId: id,
@@ -100,7 +103,7 @@ const editSchema = z.strictObject({
   replacement: z.string().max(4000),
 })
 const suggestionSchema = z.strictObject({
-  id,
+  id: moduleReviewSuggestionIdSchema,
   moduleId: id,
   priority: z.enum(['must-fix', 'optional', 'uncertain']),
   reason: z.string().trim().min(1).max(1000),

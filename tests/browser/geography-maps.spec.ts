@@ -146,11 +146,25 @@ test('new world map supports terrain, labelled Admin1, aligned zoom points, togg
     const scale = Math.min(rect.width / 800, rect.height / 480)
     const x = 56 + (((target.x - view.longitude) * view.zoom + 180) / 360) * 696
     const y = 436 - (((target.y - view.latitude) * view.zoom + 90) / 180) * 400
+    // Native click coordinates are integer CSS pixels in Chromium. Choose that
+    // pixel explicitly and verify its inverse at four-decimal precision; the
+    // arbitrary geographic target usually falls between addressable pixels.
+    const left = rect.left + (rect.width - 800 * scale) / 2
+    const top = rect.top + (rect.height - 480 * scale) / 2
+    const clientX = Math.round(left + x * scale)
+    const clientY = Math.round(top + y * scale)
     return {
-      x: rect.left + (rect.width - 800 * scale) / 2 + x * scale,
-      y: rect.top + (rect.height - 480 * scale) / 2 + y * scale,
+      x: clientX,
+      y: clientY,
+      expected: {
+        x: view.longitude + ((((clientX - left) / scale - 56) / 696) * 360 - 180) / view.zoom,
+        y: view.latitude + (((436 - (clientY - top) / scale) / 400) * 180 - 90) / view.zoom,
+      },
+      halfPixel: { x: 180 / (696 * scale * view.zoom), y: 90 / (400 * scale * view.zoom) },
     }
   }, target)
+  expect(Math.abs(client.expected.x - target.x)).toBeLessThanOrEqual(client.halfPixel.x)
+  expect(Math.abs(client.expected.y - target.y)).toBeLessThanOrEqual(client.halfPixel.y)
   await page.mouse.click(client.x, client.y)
   await expect
     .poll(() =>
@@ -162,8 +176,8 @@ test('new world map supports terrain, labelled Admin1, aligned zoom points, togg
   const clicked = await page.evaluate(() =>
     window.geographyMapTest.state.drafts['geo-map-fixture'].drawing.points.at(-1)!,
   )
-  expect(clicked.x).toBeCloseTo(target.x, 4)
-  expect(clicked.y).toBeCloseTo(target.y, 4)
+  expect(clicked.x).toBeCloseTo(client.expected.x, 4)
+  expect(clicked.y).toBeCloseTo(client.expected.y, 4)
   expect(externalMapRequests).toEqual([])
 })
 

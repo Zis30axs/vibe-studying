@@ -70,6 +70,11 @@ try {
     )
     const page = await app.firstWindow()
     page.on('pageerror', (error) => errors.push(error.message))
+    // Exercise desktop panels deterministically even on a smaller CI display.
+    await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0].setContentSize(1440, 960),
+    )
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1440)
     await expect(page.getByRole('heading', { name: '今天，理解得更深一点。' })).toBeVisible()
     await expect(page.locator('.page-footer')).toContainText(pkg.version)
     assert.equal(page.url(), 'examcraft://app/index.html')

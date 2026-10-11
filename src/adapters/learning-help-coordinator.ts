@@ -6,7 +6,7 @@ import {
 } from '../shared/types'
 import type { HelpKind, LearningSnapshot } from '../shared/learning-graph'
 import type { StudyService } from '../domain/study-service'
-import { applyModuleSuggestion } from '../domain/module-review'
+import { applyModuleSuggestion, moduleReviewSuggestionIdSchema } from '../domain/module-review'
 import { checkpointAcceptedEdit } from '../domain/argument-revisions'
 import { draftSchema, idSchema } from '../domain/schemas'
 
@@ -92,8 +92,9 @@ export class LearningHelpCoordinator {
     expectedDraft: AnswerDraft
   }): Promise<AnswerDraft> {
     const active = this.requests.get(idSchema.parse(input.requestId))
+    const suggestionId = moduleReviewSuggestionIdSchema.parse(input.suggestionId)
     const suggestion: ModuleReviewSuggestion | undefined = active?.result?.suggestions.find(
-      (item) => item.id === idSchema.parse(input.suggestionId),
+      (item) => item.id === suggestionId,
     )
     if (
       !active?.snapshot?.draft.argument ||

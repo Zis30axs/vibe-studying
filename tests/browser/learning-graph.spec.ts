@@ -13,8 +13,7 @@ test('help reference, accepted merge, subject isolation, inert text and explicit
     window.__vite_plugin_react_preamble_installed__ = true;
   </script>
   <script type="module">
-    import React from '/node_modules/.vite/deps/react.js';
-    import { createRoot } from '/node_modules/.vite/deps/react-dom_client.js';
+    import React, { createRoot } from '/tests/browser/fixtures/react.ts';
     import { LearningGraph } from '/src/components/LearningGraph.tsx';
     import { emptyDraft } from '/src/shared/types.ts';
     import { emptyLearningGraph, captureLearningSnapshot, beginLearningHelp, appendLearningEvent, acceptLearningHelp } from '/src/domain/learning-graph.ts';

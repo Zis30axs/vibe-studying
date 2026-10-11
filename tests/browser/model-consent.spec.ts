@@ -38,8 +38,7 @@ async function openFixture(page: Page) {
         window.__vite_plugin_react_preamble_installed__ = true;
       </script>
       <script type="module">
-        import React, { useState } from '/node_modules/.vite/deps/react.js';
-        import { createRoot } from '/node_modules/.vite/deps/react-dom_client.js';
+        import React, { useState, createRoot } from '/tests/browser/fixtures/react.ts';
         import { ModelConsentControl, ModelConsentSettings } from '/src/components/ModelConsentControl.tsx';
         const h = React.createElement;
         const f = window.consentFixture = {

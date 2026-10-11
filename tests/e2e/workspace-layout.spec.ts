@@ -19,6 +19,11 @@ test('panel widths, collapsed state and answer survive an actual Electron restar
     env.EXAMCRAFT_USER_DATA = userData
     app = await electron.launch({ args: ['.'], env })
     const page = await app.firstWindow()
+    // CI display size must not silently turn this desktop scenario into a closed drawer.
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].setContentSize(1440, 960)
+    })
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1440)
     await expect(page.locator('#answer-text')).toBeVisible()
     return page
   }

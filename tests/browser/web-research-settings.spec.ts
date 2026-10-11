@@ -25,8 +25,7 @@ async function openFixture(page: Page, secureStorageAvailable = true) {
       window.__vite_plugin_react_preamble_installed__ = true;
     </script>
     <script type="module">
-      import React, { useState } from '/node_modules/.vite/deps/react.js';
-      import { createRoot } from '/node_modules/.vite/deps/react-dom_client.js';
+      import React, { useState, createRoot } from '/tests/browser/fixtures/react.ts';
       import { WebResearchSettings } from '/src/components/WebResearchSettings.tsx';
       import '/src/components/appearance.css';
       const h = React.createElement;

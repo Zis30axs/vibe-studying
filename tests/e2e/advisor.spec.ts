@@ -95,6 +95,16 @@ async function launch() {
     }
   })
   const page = await app.firstWindow()
+  // This suite exercises the desktop side-by-side Advisor. CI display bounds
+  // can clamp the constructor size into drawer mode; size the real window now.
+  await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].setContentSize(1440, 960),
+  )
+  await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1440)
+  await expect(page.getByRole('button', { name: '工具与顾问', exact: true })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  )
   await expect(page.locator('#answer-text')).toBeVisible()
   return page
 }

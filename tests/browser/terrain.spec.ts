@@ -64,6 +64,9 @@ test('local terrain controls change contours and calculate probes/profiles witho
   const panel = page.getByRole('region', { name: '教学地形实验', exact: true })
   await expect(panel).toContainText('非实测 DEM')
   await expect(panel.getByRole('img', { name: '模拟教学等高线图', exact: true })).toBeVisible()
+  await expect(
+    panel.getByRole('img', { name: '模拟教学等高线图', exact: true }),
+  ).toHaveAccessibleDescription(/非实测地图。/)
   const initialCount = await panel.locator('.terrain-contours polyline').count()
   await panel.getByLabel('教学等高距', { exact: true }).selectOption('100')
   expect(await panel.locator('.terrain-contours polyline').count()).toBeLessThan(initialCount)

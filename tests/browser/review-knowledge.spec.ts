@@ -23,16 +23,15 @@ const fixture = async (page: Page) => {
       window.__vite_plugin_react_preamble_installed__ = true;
     </script>
     <script type="module">
-      import React from '/node_modules/.vite/deps/react.js';
-      import { createRoot } from '/node_modules/.vite/deps/react-dom_client.js';
+      import React, { createRoot } from '/tests/browser/fixtures/react.ts';
       import { ReviewKnowledgePanel } from '/src/components/ReviewKnowledgePanel.tsx';
       import { emptyDraft } from '/src/shared/types.ts';
       import '/src/components/appearance.css';
       const documentId = ${JSON.stringify(documentId)};
       const bytes = new Uint8Array(${JSON.stringify(Array.from(pdf))});
-      const document = { id: documentId, title: '原创测试 PDF', subject: 'politics', edition: '', editionConfirmed: false,
+      const knowledgeDocument = { id: documentId, title: '原创测试 PDF', subject: 'politics', edition: '', editionConfirmed: false,
         byteLength: bytes.length, pageCount: 3, textPageCount: 3, scopes: [], importedAt: '2026-10-11T00:00:00.000Z' };
-      const foreign = { ...document, id: 'f'.repeat(64), title: '不可跨科选择的历史 PDF', subject: 'history' };
+      const foreign = { ...knowledgeDocument, id: 'f'.repeat(64), title: '不可跨科选择的历史 PDF', subject: 'history' };
       const question = { id: 'saved-question', subject: 'politics', kind: 'essay', title: 'Original question', prompt: 'Original prompt', source: 'fixture', tags: [], maxScore: 2 };
       const attempt = { id: 'saved-attempt', questionId: question.id, questionSnapshot: question, draft: emptyDraft(), submittedAt: '2026-10-11T00:00:00.000Z', score: 1, maxScore: 2, feedback: '依法监督', rubric: [], explanation: '', reviewer: '本地规则' };
       const base = { id: ${JSON.stringify(nodeId)}, attemptId: attempt.id, questionId: attempt.questionId, subject: 'politics', reviewId: 'c'.repeat(64),
@@ -44,8 +43,8 @@ const fixture = async (page: Page) => {
       const calls = { refresh: [], search: [], label: [], associate: [], unlink: [], remove: [], pdf: [] };
       const control = window.reviewFixture = { calls, deferSearch: false, deferLabel: false, deferRefresh: false, noMatch: false, rejectAssociation: false };
       const delayed = (name, action) => new Promise((resolve) => { control['resolve' + name] = () => resolve(action()); });
-      const hits = Array.from({length: 4}, (_, index) => ({ chunkId: documentId + ':p2:c' + (index + 1), documentId, documentTitle: document.title,
-        subject: document.subject, pageNumber: 2, text: '<scr' + 'ipt>not executable</scr' + 'ipt> Original excerpt ' + (index + 1), score: 1 }));
+      const hits = Array.from({length: 4}, (_, index) => ({ chunkId: documentId + ':p2:c' + (index + 1), documentId, documentTitle: knowledgeDocument.title,
+        subject: knowledgeDocument.subject, pageNumber: 2, text: '<scr' + 'ipt>not executable</scr' + 'ipt> Original excerpt ' + (index + 1), score: 1 }));
       const update = (input, patch) => {
         const current = nodes.find(node => node.id === input.nodeId);
         if (!current || current.revision !== input.expectedRevision) throw new Error('索引版本冲突');
@@ -56,10 +55,10 @@ const fixture = async (page: Page) => {
       const api = {
         refreshReviewKnowledge: async input => { calls.refresh.push(input); const run = () => nodes.filter(node => input.attemptIds.includes(node.attemptId)); return control.deferRefresh ? delayed('Refresh', run) : run(); },
         listReviewKnowledge: async input => nodes.filter(node => node.attemptId === input.attemptId),
-        listKnowledgeDocuments: async () => [document, foreign],
+        listKnowledgeDocuments: async () => [knowledgeDocument, foreign],
         searchKnowledge: async input => { calls.search.push(input); const run = () => control.noMatch ? [] : hits; return control.deferSearch ? delayed('Search', run) : run(); },
         updateReviewKnowledgeLabel: async input => { calls.label.push(input); const run = () => update(input, { label: input.label.trim() }); return control.deferLabel ? delayed('Label', run) : run(); },
-        associateReviewKnowledge: async input => { calls.associate.push(input); if (control.rejectAssociation) throw new Error('索引版本冲突'); return update(input, { status: 'linked', references: input.chunkIds.map(chunkId => ({ chunkId, documentId, documentSha256: documentId, documentTitle: document.title, subject: 'politics', pageNumber: 2, textSha256: 'd'.repeat(64) })) }); },
+        associateReviewKnowledge: async input => { calls.associate.push(input); if (control.rejectAssociation) throw new Error('索引版本冲突'); return update(input, { status: 'linked', references: input.chunkIds.map(chunkId => ({ chunkId, documentId, documentSha256: documentId, documentTitle: knowledgeDocument.title, subject: 'politics', pageNumber: 2, textSha256: 'd'.repeat(64) })) }); },
         removeReviewKnowledgeAssociation: async input => { calls.unlink.push(input); return update(input, { status: 'pending', references: [] }); },
         removeReviewKnowledgeNode: async input => { calls.remove.push(input); update(input, {}); nodes = nodes.filter(node => node.id !== input.nodeId); },
         getKnowledgePdf: async id => { calls.pdf.push(id); return bytes.slice(); },

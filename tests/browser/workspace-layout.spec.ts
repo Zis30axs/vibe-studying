@@ -67,7 +67,7 @@ async function openWorkspace(page: Page) {
             keyStatus: 'session',
             protocol: 'openai-chat',
             model: 'synthetic',
-            baseUrl: 'https://fixture.example/v1',
+            baseUrl: 'https://fixture.vendor.com/v1',
             revision: 1,
             configured: true,
           },
@@ -248,7 +248,7 @@ test('divider adjustment preserves Advisor context; hiding its panel cancels pen
   await separator(page).focus()
   await page.keyboard.press('ArrowLeft')
   await expect(dialog).toBeVisible()
-  await dialog.getByRole('checkbox', { name: /我同意本次/ }).check()
+  await dialog.getByRole('checkbox', { name: /我同意将以上选中文字/ }).check()
   await dialog.getByRole('button', { name: '确认并获取提示', exact: true }).click()
   await expect(dialog.getByRole('button', { name: '取消请求', exact: true })).toBeVisible()
   await toolsToggle(page).click()

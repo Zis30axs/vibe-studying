@@ -15,6 +15,10 @@ async function launchWorkspace(
   const app = await electron.launch({ args: ['.'], env })
   try {
     const page = await app.firstWindow()
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].setContentSize(1440, 960)
+    })
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1440)
     await expect(page.getByRole('heading', { name: '今天，理解得更深一点。' })).toBeVisible()
     await page
       .getByRole('navigation', { name: '工作区导航' })

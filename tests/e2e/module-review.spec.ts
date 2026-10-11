@@ -8,7 +8,25 @@ import {
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import type { ModuleReviewRequest, ModuleReviewResult } from '../../src/shared/types'
+import type {
+  AnswerDraft,
+  ExamCraftApi,
+  ModuleReviewRequest,
+  ModuleReviewResult,
+} from '../../src/shared/types'
+import { applyModuleSuggestion } from '../../src/domain/module-review'
+import { checkpointAcceptedEdit } from '../../src/domain/argument-revisions'
+
+type ModuleAcceptance = Parameters<ExamCraftApi['acceptModuleSuggestion']>[0]
+type ModuleFixtureState = typeof globalThis & {
+  moduleRequests: ModuleReviewRequest[]
+  moduleReviews: { draft: AnswerDraft; result: ModuleReviewResult }[]
+  moduleAccepts: ModuleAcceptance[]
+  moduleCancels: string[]
+  moduleMode: string
+  releaseModule?: () => void
+  preparedAcceptance?: { request: ModuleAcceptance; draft: AnswerDraft }
+}
 
 // UI contracts use an IPC fake, never a real model, credential, or network request.
 let app: ElectronApplication | undefined
@@ -27,74 +45,106 @@ async function launch() {
   // Startup registers IPC handlers before creating the window. Replacing them
   // earlier can race that registration and leave startup in an error dialog.
   const page = await app.firstWindow()
+  // CI can clamp the initial native window into the narrow drawer layout.
+  // These flows deliberately exercise the desktop answer/tools layout.
+  const nativeWindow = await app.browserWindow(page)
+  await nativeWindow.evaluate((browserWindow) => browserWindow.setContentSize(1440, 960))
   await app.evaluate(({ ipcMain }) => {
-    const state = globalThis as typeof globalThis & {
-      moduleRequests: ModuleReviewRequest[]
-      moduleCancels: string[]
-      moduleMode: string
-      releaseModule?: () => void
-    }
+    const state = globalThis as ModuleFixtureState
     state.moduleRequests = []
+    state.moduleReviews = []
+    state.moduleAccepts = []
     state.moduleCancels = []
     state.moduleMode = 'success'
-    ipcMain.removeHandler('examcraft:get-model-config')
-    ipcMain.handle('examcraft:get-model-config', () => ({
-      protocol: 'openai-chat',
-      baseUrl: 'https://review.example.test',
+    const profile = {
+      protocol: 'openai-chat' as const,
+      baseUrl: 'https://review.example.com',
       model: 'mock-review',
       configured: true,
       revision: 1,
+      profileId: 'mock-review-profile',
+      profileName: 'Mock review',
+      keyStatus: 'session' as const,
+    }
+    ipcMain.removeHandler('examcraft:get-model-config')
+    ipcMain.handle('examcraft:get-model-config', () => profile)
+    ipcMain.removeHandler('examcraft:get-model-profiles')
+    ipcMain.handle('examcraft:get-model-profiles', () => ({
+      revision: 1,
+      profiles: [profile],
+      roles: { parent: profile.profileId, child: profile.profileId },
+      secureStorageAvailable: false,
     }))
-    ipcMain.removeHandler('examcraft:review-modules')
-    ipcMain.handle('examcraft:review-modules', async (_event, input: ModuleReviewRequest) => {
-      state.moduleRequests.push(input)
-      const node = input.roots[0]
-      const span = input.selectedSpans?.[0]
-      const response: ModuleReviewResult = {
-        requestId: input.requestId,
-        configRevision: input.configRevision,
-        summary: '论证方向成立，只需补足一个关键条件。',
-        confirmations: [{ moduleId: node.id, text: '保留这条材料与观点之间的联系。' }],
-        suggestions: [
-          {
-            // A model-provided ID must never inherit a decision from Object.prototype.
-            id: 'constructor',
-            moduleId: node.id,
-            priority: 'must-fix',
-            reason: '这条结论需要保留适用条件。',
-            evidence: '题干中的条件限定了推论范围。',
-            edit: {
-              operation: 'replace',
-              baseText: node.text,
-              start: span?.start ?? 0,
-              end: span?.end ?? node.text.length,
-              expectedText: span?.expectedText ?? node.text,
-              replacement: '在材料所给条件下，这一结论成立。',
-            },
-          },
-        ],
-      }
-      if (state.moduleMode === 'clean') {
-        response.suggestions = []
-        response.summary = '关键论证完整，可以保留。'
-      }
-      if (state.moduleMode === 'pending')
-        await new Promise<void>((resolve) => {
-          state.releaseModule = resolve
-        })
-      if (state.moduleMode === 'invalid') response.suggestions[0].edit!.baseText = 'wrong source'
-      return response
+    ipcMain.removeHandler('examcraft:accept-module-suggestion')
+    ipcMain.handle('examcraft:accept-module-suggestion', (_event, input: ModuleAcceptance) => {
+      const prepared = state.preparedAcceptance
+      if (!prepared || JSON.stringify(input) !== JSON.stringify(prepared.request))
+        throw new Error('Unexpected or stale mock acceptance')
+      state.moduleAccepts.push(input)
+      delete state.preparedAcceptance
+      return prepared.draft
     })
+    ipcMain.removeHandler('examcraft:review-modules')
+    ipcMain.handle(
+      'examcraft:review-modules',
+      async (_event, input: ModuleReviewRequest, draft: AnswerDraft) => {
+        state.moduleRequests.push(input)
+        const node = input.roots[0]
+        const span = input.selectedSpans?.[0]
+        const response: ModuleReviewResult = {
+          requestId: input.requestId,
+          configRevision: input.configRevision,
+          summary: '论证方向成立，只需补足一个关键条件。',
+          confirmations: [{ moduleId: node.id, text: '保留这条材料与观点之间的联系。' }],
+          suggestions: [
+            {
+              // A model-provided ID must never inherit a decision from Object.prototype.
+              id: 'constructor',
+              moduleId: node.id,
+              priority: 'must-fix',
+              reason: '这条结论需要保留适用条件。',
+              evidence: '题干中的条件限定了推论范围。',
+              edit: {
+                operation: 'replace',
+                baseText: node.text,
+                start: span?.start ?? 0,
+                end: span?.end ?? node.text.length,
+                expectedText: span?.expectedText ?? node.text,
+                replacement: '在材料所给条件下，这一结论成立。',
+              },
+            },
+          ],
+        }
+        if (state.moduleMode === 'clean') {
+          response.suggestions = []
+          response.summary = '关键论证完整，可以保留。'
+        }
+        state.moduleReviews.push({ draft, result: response })
+        if (state.moduleMode === 'pending')
+          await new Promise<void>((resolve) => {
+            state.releaseModule = resolve
+          })
+        if (state.moduleMode === 'invalid') response.suggestions[0].edit!.baseText = 'wrong source'
+        return response
+      },
+    )
     ipcMain.removeHandler('examcraft:cancel-module-review')
     ipcMain.handle('examcraft:cancel-module-review', (_event, id: string) => {
       state.moduleCancels.push(id)
     })
   })
   await page.reload()
+  await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1440)
   await page
     .getByRole('navigation', { name: '工作区导航' })
     .getByRole('button', { name: /文科组装 Argument/ })
     .click()
+  await expect(page.locator('#tools-panel')).toBeVisible()
+  await expect(page.getByRole('button', { name: /^(?:◫\s*)?工具与顾问$/ })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  )
+  await expect(page.getByTestId('palette-analysis')).toBeEnabled()
   await page.getByTestId('palette-analysis').click()
   await page.getByTestId('place-center').click()
   const text = page.getByTestId('argument-canvas').locator('[data-block-id] textarea').last()
@@ -133,7 +183,7 @@ test('explicit scope and consent; grounded finding accepts only its module and p
   const { page, text } = await launch()
   const finalBefore = await page.locator('#answer-text').inputValue()
   await page.getByRole('button', { name: '✦ 检查模块', exact: true }).click()
-  await expect(panel(page).getByText('https://review.example.test', { exact: true })).toBeVisible()
+  await expect(panel(page).getByText('https://review.example.com', { exact: true })).toBeVisible()
   await expect(panel(page).getByRole('button', { name: '确认并检查模块' })).toBeDisabled()
   expect(await requestCount()).toBe(0)
   await send(page)
@@ -143,9 +193,35 @@ test('explicit scope and consent; grounded finding accepts only its module and p
   await panel(page).getByRole('button', { name: '定位原文' }).click()
   await expect(text).toBeFocused()
   await expect(panel(page).getByRole('button', { name: '接受此修改' })).toBeEnabled()
+  // The review boundary is fake. Use the real edit/checkpoint functions to
+  // prepare the matching host acceptance result, including its revision tree.
+  const reviewed = await app!.evaluate(() => (globalThis as ModuleFixtureState).moduleReviews[0])
+  const suggestion = reviewed.result.suggestions[0]
+  const edited = applyModuleSuggestion(reviewed.draft.argument!, suggestion)
+  const acceptance = {
+    request: {
+      requestId: reviewed.result.requestId,
+      suggestionId: suggestion.id,
+      expectedDraft: reviewed.draft,
+    },
+    draft: {
+      ...reviewed.draft,
+      argument: checkpointAcceptedEdit(
+        reviewed.draft.argument!,
+        edited.roots,
+        `接受建议：${suggestion.reason.slice(0, 55)}`,
+      ),
+    },
+  }
+  await app!.evaluate((_electron, prepared) => {
+    ;(globalThis as ModuleFixtureState).preparedAcceptance = prepared
+  }, acceptance)
   await panel(page).getByRole('button', { name: '接受此修改' }).click()
   await expect(text).toHaveValue('在材料所给条件下，这一结论成立。')
   await expect(panel(page).getByText('已接受', { exact: true })).toBeVisible()
+  expect(await app!.evaluate(() => (globalThis as ModuleFixtureState).moduleAccepts)).toEqual([
+    acceptance.request,
+  ])
   await expect(page.locator('#answer-text')).toHaveValue(finalBefore)
   await page.locator('.argument-timeline > summary').click()
   const revisions = page.locator('[data-revision-id]')

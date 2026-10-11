@@ -58,6 +58,11 @@ async function launch(configured: boolean, model = 'deepseek-flash') {
     }) as typeof https.request
   })
   const page = await app.firstWindow()
+  // CI display size must not silently turn this desktop scenario into a closed drawer.
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].setContentSize(1440, 960)
+  })
+  await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1440)
   await expect(page.getByRole('heading', { name: '今天，理解得更深一点。' })).toBeVisible()
   return page
 }
@@ -129,7 +134,9 @@ test('mock cloud workflow requires each consent, preserves draft on failure and 
   await consent.check()
   await page.getByRole('button', { name: '提交并审阅' }).click()
   await expect(page.getByLabel('审阅结果').locator('.score')).toHaveText('4 / 4')
-  await expect(page.getByText('Synthetic feedback only', { exact: true })).toBeVisible()
+  await expect(
+    page.locator('.review-feedback').filter({ hasText: /^Synthetic feedback only$/ }),
+  ).toBeVisible()
   await page.screenshot({ path: 'test-results/deepseek-mocked-workflow.png', fullPage: true })
   const state = await page.evaluate(() => window.examcraft!.loadState())
   expect(state.attempts).toHaveLength(1)
@@ -139,7 +146,9 @@ test('mock cloud workflow requires each consent, preserves draft on failure and 
   const restored = await launch(false)
   await restored.getByRole('button', { name: /练习记录 Review/ }).click()
   await restored.locator('.history-item').first().click()
-  await expect(restored.getByText('Synthetic feedback only', { exact: true })).toBeVisible()
+  await expect(
+    restored.locator('.review-feedback').filter({ hasText: /^Synthetic feedback only$/ }),
+  ).toBeVisible()
 })
 
 test('invalid optional cloud model never blocks the offline desktop', async () => {
@@ -253,7 +262,9 @@ test('mock humanities review resets consent and sends current final text and str
   await page.getByRole('radio', { name: /自定义模型/ }).check()
   await page.getByRole('checkbox', { name: /我同意本次/ }).check()
   await page.getByRole('button', { name: '提交并审阅', exact: true }).click()
-  await expect(page.getByText('Synthetic humanities feedback only', { exact: true })).toBeVisible()
+  await expect(
+    page.locator('.review-feedback').filter({ hasText: /^Synthetic humanities feedback only$/ }),
+  ).toBeVisible()
   const payload = await app!.evaluate(
     () => (globalThis as typeof globalThis & { humanitiesPayload?: unknown }).humanitiesPayload,
   )
@@ -356,7 +367,9 @@ test('session Debug classifies a mocked malformed reply, copies only safe metada
   await page.getByRole('button', { name: '配置模型 / 协议', exact: true }).click()
   const debug = page.getByRole('region', { name: 'Debug · 本地脱敏诊断' })
   await expect(debug.getByRole('checkbox', { name: '开启本次会话 Debug' })).not.toBeChecked()
-  await debug.getByRole('checkbox', { name: '开启本次会话 Debug' }).check()
+  // The main-process IPC response commits this controlled checkbox asynchronously.
+  await debug.getByRole('checkbox', { name: '开启本次会话 Debug' }).click()
+  await expect(debug.getByRole('checkbox', { name: '开启本次会话 Debug' })).toBeChecked()
   await page.getByRole('button', { name: /题目练习/ }).click()
   const answer = 'synthetic-private-debug-answer'
   await page.getByRole('radio').first().click()
@@ -381,7 +394,8 @@ test('session Debug classifies a mocked malformed reply, copies only safe metada
   expect(copied).toContain('examcraft-model-debug-v1')
   expect(copied).not.toContain(answer)
   expect(copied).not.toContain('synthetic-test-marker-not-a-credential')
-  await debug.getByRole('checkbox', { name: '开启本次会话 Debug' }).uncheck()
+  await debug.getByRole('checkbox', { name: '开启本次会话 Debug' }).click()
+  await expect(debug.getByRole('checkbox', { name: '开启本次会话 Debug' })).not.toBeChecked()
   await expect(debug.getByRole('status')).toContainText('Debug 已关闭，记录已清空')
   expect((await page.evaluate(() => window.examcraft!.getModelDebug())).records).toEqual([])
 })

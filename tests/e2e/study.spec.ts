@@ -122,6 +122,11 @@ test('closing the window drains a slow in-flight draft write before exit', async
 
 test('practice keeps the answer beside independently scrolling tools and supports collapse and resizing', async () => {
   const page = await launch()
+  // Establish the desktop geometry before exercising the native resize transitions below.
+  await app!.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].setContentSize(1440, 960)
+  })
+  await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1440)
   await expect(page.locator('.learning-overview')).toHaveCount(0)
   await expect(page.getByTestId('activity-heatmap')).toHaveCount(0)
   await page.getByRole('button', { name: '练习记录 Review & reflect', exact: true }).click()

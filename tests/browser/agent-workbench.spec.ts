@@ -37,8 +37,7 @@ async function openFixture(page: Page, rememberedWeb = false) {
     window.__vite_plugin_react_preamble_installed__ = true;
   </script>
   <script type="module">
-    import React, { useRef, useState } from '/node_modules/.vite/deps/react.js';
-    import { createRoot } from '/node_modules/.vite/deps/react-dom_client.js';
+    import React, { useRef, useState, createRoot } from '/tests/browser/fixtures/react.ts';
     import { AgentWorkbench } from '/src/components/AgentWorkbench.tsx';
     import '/src/components/appearance.css';
     const h = React.createElement;
@@ -46,7 +45,7 @@ async function openFixture(page: Page, rememberedWeb = false) {
     const q = { id: 'q1', subject: 'math', kind: 'math', title: 'Synthetic current question', prompt: 'Compute distance', source: 'fixture', tags: [], maxScore: 5 };
     const f = window.agentFixture = { starts: 0, polls: 0, cancels: 0, accepts: 0, applies: 0, saves: 0, metadataReads: 0, mode: 'normal', delayAccept: false, releaseAccept: null };
     let run = null;
-    f.finish = () => { run = { ...run, status: 'complete', elapsedMs: 750, modelRequests: 2, toolCalls: 1, sessionRequests: 2, text: '<script>plain model output</script>', message: '任务结束。预览尚未写入。', events: [{ sequence: 1, kind: 'tool', tool: 'math_measure', status: 'complete', elapsedMs: 5 }], proposals: f.lastRequest.allowedTools.includes('propose_answer_edit') ? [{ proposalId: 'p1', proposal: { kind: 'answer-edit', questionId: 'q1', expectedText: 'Original answer', replacement: 'Revised answer', reason: 'Synthetic revision' } }] : [] }; };
+    f.finish = () => { run = { ...run, status: 'complete', elapsedMs: 750, modelRequests: 2, toolCalls: 1, sessionRequests: 2, text: '<scr' + 'ipt>plain model output</scr' + 'ipt>', message: '任务结束。预览尚未写入。', events: [{ sequence: 1, kind: 'tool', tool: 'math_measure', status: 'complete', elapsedMs: 5 }], proposals: f.lastRequest.allowedTools.includes('propose_answer_edit') ? [{ proposalId: 'p1', proposal: { kind: 'answer-edit', questionId: 'q1', expectedText: 'Original answer', replacement: 'Revised answer', reason: 'Synthetic revision' } }] : [] }; };
     const api = {
       getWebResearchConfig: async () => ({ provider: 'tavily', revision: 1, configured: true, keyStatus: 'session', secureStorageAvailable: true }),
       saveWebResearchConfig: async () => { throw new Error('Settings are not part of this fixture'); },

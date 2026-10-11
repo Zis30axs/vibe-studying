@@ -31,7 +31,8 @@ export function TerrainMap({
       className="terrain-map"
       viewBox="0 0 600 430"
       role="img"
-      aria-labelledby={`terrain-title-${id} terrain-desc-${id}`}
+      aria-labelledby={`terrain-title-${id}`}
+      aria-describedby={`terrain-desc-${id}`}
     >
       <title id={`terrain-title-${id}`}>模拟教学等高线图</title>
       <desc id={`terrain-desc-${id}`}>

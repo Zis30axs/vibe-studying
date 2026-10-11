@@ -110,6 +110,11 @@ async function launch() {
     }
   }, fixture)
   const page = await app.firstWindow()
+  // CI display size must not silently turn this desktop scenario into a closed drawer.
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].setContentSize(1440, 960)
+  })
+  await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1440)
   await expect(page.getByRole('heading', { name: '今天，理解得更深一点。' })).toBeVisible()
   await page
     .getByRole('navigation', { name: '工作区导航' })
@@ -197,8 +202,12 @@ test('real UI consent → private preview → accept → practice → feedback a
   await page.getByRole('radio', { name: /本地规则/ }).check()
   await page.getByRole('button', { name: /提交并审阅/ }).click()
   const review = page.getByRole('region', { name: '审阅结果', exact: true })
-  await expect(review.getByText(PRIVATE_REFERENCE, { exact: true })).toBeVisible()
-  await expect(review.getByText(PRIVATE_RUBRIC, { exact: true })).toBeVisible()
+  await expect(
+    review.locator('.explanation').getByText(PRIVATE_REFERENCE, { exact: true }),
+  ).toBeVisible()
+  await expect(
+    review.locator('.rubric-list').getByText(PRIVATE_RUBRIC, { exact: true }),
+  ).toBeVisible()
   await review.getByText('本次题目与示意图快照', { exact: true }).click()
   await expect(review.locator('.geography-figure svg')).toBeVisible()
   const state = await page.evaluate(() => window.examcraft!.loadState())
@@ -215,7 +224,9 @@ test('real UI consent → private preview → accept → practice → feedback a
   await assertNoPrivateReference(restored)
   await restored.getByRole('tab', { name: /审阅反馈/ }).click()
   const restoredReview = restored.getByRole('region', { name: '审阅结果', exact: true })
-  await expect(restoredReview.getByText(PRIVATE_REFERENCE, { exact: true })).toBeVisible()
+  await expect(
+    restoredReview.locator('.explanation').getByText(PRIVATE_REFERENCE, { exact: true }),
+  ).toBeVisible()
   await restoredReview.getByText('本次题目与示意图快照', { exact: true }).click()
   await expect(restoredReview.locator('.geography-figure svg')).toBeVisible()
   expect((await restored.evaluate(() => window.examcraft!.loadState())).attempts[0]).toEqual(

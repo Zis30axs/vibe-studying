@@ -46,10 +46,10 @@ jobs:
           path: work/release/*
           if-no-files-found: error
           retention-days: 14
-      - if: failure() && runner.os == 'Windows'
+      - if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-test-results
+          name: gui-test-results-${{ runner.os }}
           path: test-results/
           retention-days: 7
   publish:

@@ -16,6 +16,10 @@ test('math tools: drag, precise edits, measurements, function, undo, snapshots a
     env.EXAMCRAFT_USER_DATA = userData
     app = await electron.launch({ args: ['.'], env })
     const page = await app.firstWindow()
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].setContentSize(1440, 960)
+    })
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1440)
     await page
       .getByRole('navigation')
       .getByRole('button', { name: /数学工作台/ })

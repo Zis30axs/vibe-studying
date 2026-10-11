@@ -101,6 +101,11 @@ describe('computed terrain exercises and reference separation', () => {
     const q = create()
     const view = renderToStaticMarkup(createElement(TerrainFigure, { exercise: q.terrain! }))
     expect(view).toContain('模拟教学等高线')
+    const titleId = view.match(/aria-labelledby="([^"]+)"/)![1]
+    const descriptionId = view.match(/aria-describedby="([^"]+)"/)![1]
+    expect(titleId).not.toContain(' ')
+    expect(view).toContain(`<title id="${titleId}">模拟教学等高线图</title>`)
+    expect(view).toContain(`<desc id="${descriptionId}">非实测地图。`)
     expect(view).toContain('<polyline')
     expect(view).toContain('米制局部坐标')
     expect(view).not.toContain('terrain-profile-line')
