@@ -36,8 +36,10 @@ const messages = {
   response_interrupted: '已收到服务响应，但读取过程中连接中断。请检查网络或代理后重试。',
   dns: '无法解析服务域名，请检查 Base URL 的拼写和本机 DNS。',
   tls: 'TLS 安全连接失败，请检查系统时间、证书和网络代理；应用不会跳过证书验证。',
+  proxy:
+    '代理不可用或不受支持。请选择本机 HTTP / 混合代理端口；不支持远程代理、SOCKS 或代理认证，失败不会自动改为直连。',
   endpoint_blocked:
-    '域名解析到了非公网地址，已在发送前拦截。请检查本机 DNS 或代理是否启用了 Fake IP；应用仅连接公网 HTTPS 服务。',
+    '域名解析到了非公网地址，已在发送前拦截。使用 Clash Fake-IP 时，请在网络连接中选择系统代理或本机代理；其他私网地址仍被阻止。',
   redirect_blocked:
     '接口返回了重定向，已停止请求以避免将密钥转发到其他地址。请使用服务商提供的最终 API Base URL。',
   server: '已连接到服务，但服务返回了服务器错误。请稍后重试或联系服务商。',
@@ -172,6 +174,8 @@ function connectionFailure(error: unknown): ModelDiagnosticError {
     const item = value as { code?: unknown; cause?: unknown; errors?: unknown }
     const code = safeConnectionCode(item.code)
     if (code) {
+      if (code.startsWith('PROXY_'))
+        return new ModelDiagnosticError('proxy', { stage: 'proxy', networkCode: code })
       if (
         ['ENOTFOUND', 'EAI_AGAIN', 'EAI_FAIL', 'DNS_LOOKUP_FAILED', 'DNS_NO_ADDRESS'].includes(code)
       )

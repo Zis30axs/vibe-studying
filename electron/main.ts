@@ -1,6 +1,7 @@
 import { resolveAgentKnowledgeIndex } from '../src/adapters/agent-knowledge'
 import { ReviewKnowledgeIndex, ReviewKnowledgeError } from '../src/adapters/review-knowledge-index'
 import { bindWindowWorkCancellation } from './window-work-lifecycle'
+import { createSystemProxyResolver } from './model-system-proxy'
 import { WebResearchStore } from '../src/adapters/web-research-store'
 import { TavilyWebResearchProvider } from '../src/adapters/web-research-provider'
 import type { WebResearchConfigInput } from '../src/shared/web-research'
@@ -633,12 +634,17 @@ function registerIpc(
   )
   handle(
     'examcraft:submit-answer',
-    (questionId, draft, options) =>
-      service.submitAnswer(
+    (questionId, draft, options) => {
+      // Legacy callers must use the migrated named profile so no desktop model request
+      // can bypass its explicit network route, revision check and cancellation lifecycle.
+      if ((options as SubmissionOptions | undefined)?.provider === 'deepseek')
+        throw new Error('请在模型设置中使用已迁移的模型配置，并重新确认本次发送。')
+      return service.submitAnswer(
         questionId as string,
         draft as AnswerDraft,
         options as SubmissionOptions | undefined,
-      ),
+      )
+    },
     true,
   )
   handle('examcraft:capabilities', () => ({
@@ -797,6 +803,7 @@ else {
         workerPath: join(__dirname, 'knowledge-pdf-worker.cjs'),
       })
       const models = new ModelService(app.getPath('userData'), {
+        resolveSystemProxy: createSystemProxyResolver(),
         secureStorage: osSecretStorage(safeStorage),
         resolveQuestion: (id) => bank.get(id),
         resolveKnowledgeChunks: (ids) => knowledge.resolveChunks(ids),

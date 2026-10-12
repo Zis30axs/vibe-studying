@@ -4,6 +4,7 @@ import {
   type ModelConnectionDetails,
 } from '../shared/model-connection-diagnostics'
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { modelNetworkSchema, type ModelNetworkConfig } from '../shared/model-network'
 import type {
   ExamCraftApi,
   ModelKeyStatus,
@@ -35,6 +36,20 @@ const keyLabels: Record<ModelKeyStatus, string> = {
   missing: '尚未配置密钥',
   locked: '已保存的密钥暂不可读取',
 }
+const networkLabels: Record<ModelNetworkConfig['mode'], string> = {
+  direct: '直连（默认）',
+  system: '使用系统代理',
+  local: '指定本机代理',
+}
+const invalidNetworkMessage =
+  '请填写有效的本机 HTTP 代理：http://127.0.0.1:端口 或 http://[::1]:端口；不要包含账号、密码、路径或参数。'
+function sameNetwork(left: ModelNetworkConfig, right?: ModelNetworkConfig) {
+  const saved = right ?? { mode: 'direct' }
+  return (
+    left.mode === saved.mode &&
+    (left.mode !== 'local' || (saved.mode === 'local' && left.proxyUrl === saved.proxyUrl))
+  )
+}
 const diagnosticErrors: Record<string, string> = {
   auth: '身份验证失败，请检查 API Key 和服务访问权限。',
   not_found: '服务接口或模型不存在，请检查接口地址、协议和模型名称。',
@@ -46,7 +61,9 @@ const diagnosticErrors: Record<string, string> = {
   dns: '无法解析服务域名，请检查接口地址的拼写和本机 DNS。',
   tls: 'TLS 安全连接失败，请检查系统时间、证书和网络代理；应用不会跳过证书验证。',
   endpoint_blocked:
-    '域名解析到了非公网地址，已在发送前拦截。请检查本机 DNS 或代理是否启用了 Fake IP；应用仅连接公网 HTTPS 服务。',
+    '域名解析到了非公网地址，已在发送前拦截。若使用 Clash Fake IP，请在网络连接方式中选择系统代理或指定本机 HTTP / mixed 代理；模型接口仍须为公网 HTTPS。',
+  proxy:
+    '所选代理不可用或不受支持。请检查 Clash 是否运行、系统是否提供本机 HTTP 代理，或指定 HTTP / mixed 端口；本次请求不会回退直连。',
   redirect_blocked:
     '接口返回了重定向，已停止请求以避免将密钥转发到其他地址。请使用服务商提供的最终 API 地址。',
   server: '已连接到服务，但服务返回了服务器错误。请稍后重试或联系服务商。',
@@ -64,6 +81,7 @@ interface Editor {
   protocol: ModelProtocol
   baseUrl: string
   model: string
+  network: ModelNetworkConfig
   apiKey: string
   clearApiKey: boolean
   persistApiKey: boolean
@@ -75,6 +93,7 @@ function editorFor(profile?: ModelProfile): Editor {
     protocol: profile?.protocol ?? 'openai-chat',
     baseUrl: profile?.baseUrl ?? defaults['openai-chat'].baseUrl,
     model: profile?.model ?? defaults['openai-chat'].model,
+    network: profile?.network ? { ...profile.network } : { mode: 'direct' },
     apiKey: '',
     clearApiKey: false,
     // Persisting a newly entered key always needs an explicit opt-in.
@@ -145,12 +164,14 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
       editor.protocol !== profile.protocol ||
       editor.baseUrl !== profile.baseUrl ||
       editor.model !== profile.model ||
+      !sameNetwork(editor.network, profile.network) ||
       Boolean(editor.apiKey) ||
       editor.clearApiKey
     : Boolean(editor.profileName || editor.apiKey) ||
       editor.protocol !== 'openai-chat' ||
       editor.baseUrl !== defaults['openai-chat'].baseUrl ||
-      editor.model !== defaults['openai-chat'].model
+      editor.model !== defaults['openai-chat'].model ||
+      editor.network.mode !== 'direct'
   const rolesDirty = Boolean(
     state && (roles.parent !== state.roles.parent || roles.child !== state.roles.child),
   )
@@ -262,6 +283,10 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
   async function save(event: React.FormEvent) {
     event.preventDefault()
     if (mutationPending.current || !state) return
+    if (!modelNetworkSchema.safeParse(editor.network).success) {
+      setMessage(invalidNetworkMessage)
+      return
+    }
     mutationPending.current = true
     const epoch = navigationEpoch.current
     const input = {
@@ -270,6 +295,7 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
       protocol: editor.protocol,
       baseUrl: editor.baseUrl.trim(),
       model: editor.model.trim(),
+      network: editor.network,
       ...(editor.apiKey ? { apiKey: editor.apiKey } : {}),
       clearApiKey: editor.clearApiKey,
       persistApiKey: editor.persistApiKey,
@@ -306,7 +332,7 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
     } catch {
       if (!mounted.current || navigationEpoch.current !== epoch) return
       setMessage(
-        '设置未保存。请检查配置名称、接口地址、模型与系统安全存储；若配置已变更，请重新读取。密钥需要重新输入。',
+        '设置未保存。请检查配置名称、接口地址、网络连接方式、模型与系统安全存储；若配置已变更，请重新读取。密钥需要重新输入。',
       )
     } finally {
       mutationPending.current = false
@@ -364,6 +390,10 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
   }
   async function diagnose(kind: 'list' | 'test') {
     if (diagnosticRequest.current || mutationPending.current || !state || editor.clearApiKey) return
+    if (!modelNetworkSchema.safeParse(editor.network).success) {
+      setDiagnosticMessage(invalidNetworkMessage)
+      return
+    }
     const requestId = crypto.randomUUID()
     const epoch = navigationEpoch.current
     diagnosticRequest.current = requestId
@@ -380,6 +410,7 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
         protocol: editor.protocol,
         baseUrl: editor.baseUrl.trim(),
         model: editor.model.trim(),
+        network: editor.network,
         ...(editor.apiKey ? { apiKey: editor.apiKey } : {}),
         kind,
       })
@@ -550,6 +581,48 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
                 />
               </label>
               <label className="model-settings-wide">
+                网络连接方式
+                <select
+                  aria-label="网络连接方式"
+                  value={editor.network.mode}
+                  disabled={busy}
+                  onChange={(event) => {
+                    const mode = event.target.value
+                    if (mode === 'local') edit({ network: { mode, proxyUrl: '' } })
+                    else if (mode === 'direct' || mode === 'system') edit({ network: { mode } })
+                  }}
+                >
+                  <option value="direct">{networkLabels.direct}</option>
+                  <option value="system">{networkLabels.system}</option>
+                  <option value="local">{networkLabels.local}</option>
+                </select>
+              </label>
+              {editor.network.mode === 'local' && (
+                <label className="model-settings-wide">
+                  本机 HTTP 代理地址
+                  <input
+                    type="url"
+                    required
+                    maxLength={64}
+                    value={editor.network.proxyUrl}
+                    disabled={busy}
+                    onChange={(event) =>
+                      edit({ network: { mode: 'local', proxyUrl: event.target.value } })
+                    }
+                    placeholder="http://127.0.0.1:端口"
+                    autoComplete="off"
+                    spellCheck={false}
+                    aria-describedby="model-network-help"
+                  />
+                </label>
+              )}
+              <p className="advisor-muted model-settings-wide" id="model-network-help">
+                Clash Fake IP 用户可选择系统代理或指定本机代理。仅支持 127.0.0.1 / [::1] 的 HTTP
+                代理（Clash 的 HTTP / mixed 端口，不是 SOCKS 端口）；按 Clash 中显示的端口填写。
+                代理失败不会自动回退直连，应用不会修改系统或 Clash
+                设置。此选项用于模型列表、连接测试及实际模型请求，保存后生效；下方诊断可直接测试当前选择。
+              </p>
+              <label className="model-settings-wide">
                 {editor.persistApiKey ? 'API Key（加密保存到本机）' : 'API Key（仅本次会话）'}
                 <input
                   type="password"
@@ -614,7 +687,7 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
             <h3>获取模型与连接测试</h3>
             <p className="advisor-muted model-destination-preview">
               当前编辑接收方：{editor.baseUrl || '尚未填写'} · {editor.protocol} ·{' '}
-              {editor.model || '尚未填写模型'}
+              {editor.model || '尚未填写模型'} · {networkLabels[editor.network.mode]}
             </p>
             <p className="advisor-muted">
               仅点击时联网，使用上方当前填写的配置与密钥。获取模型会读取服务商模型列表；连接测试会发送一条极短的固定测试内容，可能产生少量
@@ -669,7 +742,9 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
                     {diagnosticDetails.httpStatus ? ` · HTTP ${diagnosticDetails.httpStatus}` : ''}
                     {['dns', 'connect', 'tls', 'security'].includes(diagnosticDetails.stage) && (
                       <span style={{ display: 'block' }}>
-                        当前桌面连接不会自动采用浏览器或系统代理设置。
+                        {editor.network.mode === 'direct'
+                          ? '当前选择直连；Clash Fake IP 用户可选择系统代理或指定本机 HTTP / mixed 代理。'
+                          : '当前使用所选代理方式；请检查本机 HTTP / mixed 端口。代理失败不会自动回退直连。'}
                       </span>
                     )}
                   </span>

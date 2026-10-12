@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ModelService } from '../src/adapters/model-service'
+import { ModelProfileStore } from '../src/adapters/model-profile-store'
+import { modelNetworkSchema } from '../src/shared/model-network'
 import { osSecretStorage } from '../src/adapters/os-secret-storage'
 import {
   emptyDraft,
@@ -132,6 +134,7 @@ function editInput(
     protocol: profile.protocol,
     baseUrl: profile.baseUrl,
     model: profile.model,
+    network: profile.network,
     apiKey: undefined,
     ...overrides,
   })
@@ -180,6 +183,7 @@ function diagnosticInput(
     protocol: profile.protocol,
     baseUrl: profile.baseUrl,
     model: profile.model,
+    network: profile.network,
     kind: 'list',
     ...overrides,
   }
@@ -287,6 +291,142 @@ describe('OS secret-storage adapter', () => {
   })
 })
 
+describe('model network configuration', () => {
+  it.each(['http://127.0.0.1:80', 'http://127.0.0.1:7897/', 'http://[::1]:65535'])(
+    'accepts explicit HTTP loopback proxy %s',
+    (proxyUrl) => {
+      expect(modelNetworkSchema.parse({ mode: 'local', proxyUrl })).toEqual({
+        mode: 'local',
+        proxyUrl,
+      })
+    },
+  )
+
+  it.each([
+    'http://localhost:7897',
+    'http://127.1:7897',
+    'http://2130706433:7897',
+    'http://0x7f000001:7897',
+    'http://127.0.0.2:7897',
+    'http://192.168.1.1:7897',
+    'http://proxy.vendor.com:7897',
+    'http://[::ffff:127.0.0.1]:7897',
+    'https://127.0.0.1:7897',
+    'socks5://127.0.0.1:7897',
+    'http://127.0.0.1',
+    'http://127.0.0.1:0',
+    'http://127.0.0.1:65536',
+    'http://127.0.0.1:07897',
+    `http://${parentKey}@127.0.0.1:7897`,
+    'http://127.0.0.1:7897/path',
+    `http://127.0.0.1:7897/?key=${parentKey}`,
+    `http://127.0.0.1:7897/#${parentKey}`,
+    'http://127.0.0.1:7897/../',
+    'http://127.0.0.1:7897\\',
+    ' http://127.0.0.1:7897',
+    'http://127.0.0.1:7897\n',
+  ])('rejects alternate or credential-bearing proxy spelling %#', (proxyUrl) => {
+    const result = modelNetworkSchema.safeParse({ mode: 'local', proxyUrl })
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.error.message).not.toContain(parentKey)
+      expect(result.error.issues[0].message).toContain('本机代理')
+    }
+  })
+
+  it('rejects proxy metadata on direct/system modes and unknown network fields', () => {
+    for (const mode of ['direct', 'system', 'local']) {
+      expect(
+        modelNetworkSchema.safeParse({
+          mode,
+          proxyUrl: 'http://127.0.0.1:7897',
+          credentials: parentKey,
+        }).success,
+      ).toBe(false)
+    }
+  })
+
+  it.each([true, false])(
+    'persists per-profile network changes and preserves the same target key (persisted=%s)',
+    async (persistApiKey) => {
+      const encryption = secureStorage()
+      const { models, directory, restart } = await setup({ secureStorage: encryption })
+      let state = await models.saveProfile(
+        profileInput(await models.getProfiles(), { persistApiKey }),
+      )
+      const profileId = state.profiles.find(
+        (profile) => profile.profileName === 'Synthetic parent',
+      )!.profileId
+      state = await models.assignProfiles({
+        roles: { parent: profileId, child: profileId },
+        expectedRevision: state.revision,
+      })
+      const beforeRevision = state.revision
+      const network = { mode: 'local', proxyUrl: 'http://127.0.0.1:7897' } as const
+      state = await models.saveProfile(editInput(state, profileId, { network }))
+      expect(state.revision).toBe(beforeRevision + 1)
+      expect(state.profiles.find((profile) => profile.profileId === profileId)).toMatchObject({
+        network,
+        configured: true,
+        keyStatus: persistApiKey ? 'saved' : 'session',
+      })
+      expect(await models.getConfig()).toMatchObject({ network, configured: true })
+      const disk = JSON.parse(await readFile(join(directory, 'model-profiles.json'), 'utf8'))
+      expect(
+        disk.profiles.find((profile: { profileId: string }) => profile.profileId === profileId)
+          .network,
+      ).toEqual(network)
+      expect(await restart().getConfig()).toMatchObject({ network, configured: persistApiKey })
+      state = await models.saveProfile(editInput(state, profileId, { network: { mode: 'system' } }))
+      expect(await models.getConfig()).toMatchObject({
+        network: { mode: 'system' },
+        configured: true,
+      })
+      expect(await restart().getConfig()).toMatchObject({ network: { mode: 'system' } })
+      expect(JSON.stringify(state)).not.toContain(parentKey)
+      await assertNoPlaintext(directory)
+    },
+  )
+
+  it('loads pre-network named profiles as direct without modifying their revision or ciphertext', async () => {
+    const encryption = secureStorage()
+    const { models, directory, restart } = await setup({ secureStorage: encryption })
+    const { state } = await twoProfiles(models)
+    const file = join(directory, 'model-profiles.json')
+    const disk = JSON.parse(await readFile(file, 'utf8'))
+    for (const profile of disk.profiles) delete profile.network
+    await writeFile(file, JSON.stringify(disk))
+    const restored = await restart().getProfiles()
+    expect(restored.revision).toBe(state.revision)
+    expect(restored.profiles.every((profile) => profile.network?.mode === 'direct')).toBe(true)
+    expect(restored.profiles.filter((profile) => profile.keyStatus === 'saved')).toHaveLength(2)
+  })
+
+  it('fails closed on invalid stored or submitted proxy data without overwriting the profile file', async () => {
+    const { directory } = await setup()
+    const store = new ModelProfileStore(directory)
+    const state = await store.saveProfile(
+      profileInput(await store.getProfiles(), { persistApiKey: false }),
+    )
+    const file = join(directory, 'model-profiles.json')
+    const before = await readFile(file, 'utf8')
+    await expect(
+      store.saveProfile(
+        profileInput(state, {
+          persistApiKey: false,
+          network: { mode: 'local', proxyUrl: `http://${parentKey}@127.0.0.1:7897` },
+        }),
+      ),
+    ).rejects.toThrow('模型配置无效')
+    expect(await readFile(file, 'utf8')).toBe(before)
+    const corrupt = JSON.parse(before)
+    corrupt.profiles[0].network = { mode: 'local', proxyUrl: 'http://192.168.1.1:7897' }
+    await writeFile(file, JSON.stringify(corrupt))
+    await expect(new ModelProfileStore(directory).getProfiles()).rejects.toThrow('原文件未覆盖')
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(corrupt)
+  })
+})
+
 describe('named model profiles: encrypted persistence and public projection', () => {
   it('migrates legacy non-secret metadata to a stable default without inventing a key', async () => {
     const { models, directory, restart } = await setup()
@@ -308,6 +448,7 @@ describe('named model profiles: encrypted persistence and public projection', ()
       model: 'legacy-model',
       configured: false,
       keyStatus: 'missing',
+      network: { mode: 'direct' },
     })
     expect(state.roles).toEqual({ parent: 'legacy-default', child: 'legacy-default' })
     expect(state.revision).toBeGreaterThanOrEqual(7)
@@ -691,7 +832,7 @@ describe('named model profiles: role routing and cancellation', () => {
     }
   })
 
-  it.each(['save', 'assign', 'delete'] as const)(
+  it.each(['save', 'network', 'assign', 'delete'] as const)(
     'invalidates old consent across both roles after %s',
     async (mutation) => {
       const fetcher = vi.fn<typeof fetch>()
@@ -700,6 +841,8 @@ describe('named model profiles: role routing and cancellation', () => {
       const previouslyCreatedReviewer = await models.reviewer(state.revision)
       if (mutation === 'save')
         await models.saveProfile(editInput(state, childId, { profileName: 'Renamed child' }))
+      if (mutation === 'network')
+        await models.saveProfile(editInput(state, parentId, { network: { mode: 'system' } }))
       if (mutation === 'assign')
         await models.assignProfiles({
           expectedRevision: state.revision,
@@ -720,7 +863,7 @@ describe('named model profiles: role routing and cancellation', () => {
     },
   )
 
-  it.each(['save', 'assign', 'delete'] as const)(
+  it.each(['save', 'network', 'assign', 'delete'] as const)(
     'aborts all running grading, advisor, module and generation calls on %s',
     async (mutation) => {
       const signals: AbortSignal[] = []
@@ -740,6 +883,8 @@ describe('named model profiles: role routing and cancellation', () => {
       await vi.waitFor(() => expect(signals).toHaveLength(4))
       if (mutation === 'save')
         await models.saveProfile(editInput(state, childId, { profileName: 'Renamed child' }))
+      if (mutation === 'network')
+        await models.saveProfile(editInput(state, parentId, { network: { mode: 'system' } }))
       if (mutation === 'assign')
         await models.assignProfiles({
           expectedRevision: state.revision,
@@ -912,7 +1057,7 @@ describe('model diagnostics through the main-process profile boundary', () => {
     },
   )
 
-  it.each(['save', 'assign', 'delete'] as const)(
+  it.each(['save', 'network', 'assign', 'delete'] as const)(
     'cancels an in-flight diagnostic after %s without publishing models',
     async (mutation) => {
       let signal: AbortSignal | undefined
@@ -926,6 +1071,8 @@ describe('model diagnostics through the main-process profile boundary', () => {
       await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
       if (mutation === 'save')
         await models.saveProfile(editInput(state, childId, { profileName: 'Changed child' }))
+      if (mutation === 'network')
+        await models.saveProfile(editInput(state, parentId, { network: { mode: 'system' } }))
       if (mutation === 'assign')
         await models.assignProfiles({
           expectedRevision: state.revision,

@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { AtomicJsonStore, readJsonFile } from './atomic-json-store'
 import { protocolSchema, validateBaseUrl } from './model-transport'
+import { modelNetworkSchema } from '../shared/model-network'
 import type {
   ModelConfig,
   ModelConfigInput,
@@ -21,6 +22,7 @@ export interface ModelSecretStorage {
 export const modelMetadataSchema = z.strictObject({
   protocol: protocolSchema,
   baseUrl: z.string().transform(validateBaseUrl),
+  network: modelNetworkSchema.default({ mode: 'direct' }),
   model: z
     .string()
     .trim()
@@ -112,6 +114,7 @@ export class ModelProfileStore {
           () => ({
             protocol: 'openai-chat',
             baseUrl: 'https://api.deepseek.com',
+            network: { mode: 'direct' },
             model:
               this.options.model && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(this.options.model)
                 ? this.options.model
@@ -127,6 +130,7 @@ export class ModelProfileStore {
               protocol: legacy.protocol,
               baseUrl: legacy.baseUrl,
               model: legacy.model,
+              network: legacy.network,
               profileId: 'legacy-default',
               profileName: '默认配置',
             },
@@ -192,6 +196,7 @@ export class ModelProfileStore {
           protocol: profile.protocol,
           baseUrl: profile.baseUrl,
           model: profile.model,
+          network: { ...profile.network },
           revision: state.revision,
           configured: Boolean(secret.key),
           keyStatus: secret.status,
@@ -207,6 +212,7 @@ export class ModelProfileStore {
       protocol: p.protocol,
       baseUrl: p.baseUrl,
       model: p.model,
+      network: p.network ? { ...p.network } : { mode: 'direct' },
       revision: state.revision,
       configured: p.configured,
       profileId: p.profileId,
@@ -230,6 +236,7 @@ export class ModelProfileStore {
         protocol: profile.protocol,
         baseUrl: profile.baseUrl,
         model: profile.model,
+        network: { ...profile.network },
         revision: state.revision,
         configured: true,
         profileId: profile.profileId,
@@ -263,7 +270,7 @@ export class ModelProfileStore {
     try {
       parsed = saveSchema.parse(input)
     } catch {
-      throw new Error('模型配置无效，请检查名称、协议、地址和模型。')
+      throw new Error('模型配置无效，请检查名称、协议、地址、网络连接方式和模型。')
     }
     const store = await this.store()
     let sessionChange: { id: string; key?: string; target: string } | undefined
@@ -286,6 +293,7 @@ export class ModelProfileStore {
         protocol: parsed.protocol,
         baseUrl: parsed.baseUrl,
         model: parsed.model,
+        network: parsed.network,
         ...(previous?.encryptedApiKey ? { encryptedApiKey: previous.encryptedApiKey } : {}),
       }
       if (!previous || target(previous) !== target(next) || parsed.clearApiKey) {

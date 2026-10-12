@@ -18,6 +18,8 @@ import {
 import type { KnowledgeEvidence } from '../shared/knowledge'
 import { z } from 'zod'
 import { ModelTransport } from './model-transport'
+import { createModelFetch } from './model-network-transport'
+import type { ModelNetworkConfig } from '../shared/model-network'
 import { ModelToolTransport } from './model-tool-transport'
 import {
   ModelProfileStore,
@@ -72,7 +74,7 @@ export class ModelService {
       transport: new ModelToolTransport(
         config,
         key,
-        this.options.fetchImpl,
+        this.fetchFor(config.network),
         this.options.timeoutMs,
         this.debug.record,
       ),
@@ -134,6 +136,8 @@ export class ModelService {
       apiKey?: string
       model?: string
       fetchImpl?: typeof fetch
+      /** Main-process system route resolver; never supplied by renderer input. */
+      resolveSystemProxy?: (url: string) => Promise<string>
       timeoutMs?: number
       listQuestions?: () => Promise<Question[]>
       persistGenerated?: (question: Question) => Promise<unknown>
@@ -144,6 +148,9 @@ export class ModelService {
     } = {},
   ) {
     this.profiles = new ModelProfileStore(directory, options)
+  }
+  private fetchFor(network?: ModelNetworkConfig): typeof fetch {
+    return this.options.fetchImpl ?? createModelFetch(network, this.options.resolveSystemProxy)
   }
   private async resolveQuestion(id: string): Promise<Question> {
     try {
@@ -193,7 +200,7 @@ export class ModelService {
       transport: new ModelTransport(
         config,
         key,
-        this.options.fetchImpl,
+        this.fetchFor(config.network),
         this.options.timeoutMs,
         this.debug.record,
       ),
@@ -297,7 +304,7 @@ export class ModelService {
         parsed.kind === 'list' ? 'models-endpoint' : safeModelDebugModel(parsed.model, key)
       if (controller.signal.aborted) throw new Error('请求已取消。')
       const options = {
-        fetchImpl: this.options.fetchImpl,
+        fetchImpl: this.fetchFor(parsed.network),
         timeoutMs: this.options.timeoutMs,
         signal: controller.signal,
       }

@@ -11,6 +11,7 @@ import type { ModelConsentApi } from './model-consent'
 import type { KnowledgeApi } from './knowledge'
 import type { GitHubDisplayProfile } from './github-profile'
 import type { QuestionResearchOrigin, QuestionResearchSource } from './question-research'
+import type { ModelNetworkConfig } from './model-network'
 export type Subject = 'chinese' | 'math' | 'english' | 'politics' | 'history' | 'geography'
 export type QuestionKind = 'choice' | Subject
 export type BlockCategory = 'principle' | 'material' | 'analysis' | 'conclusion'
@@ -236,6 +237,8 @@ export interface ModelConfig {
   protocol: ModelProtocol
   baseUrl: string
   model: string
+  /** Omitted by older clients; defaults to a public HTTPS direct connection. */
+  network?: ModelNetworkConfig
   revision: number
   configured: boolean
   profileId?: string
@@ -245,6 +248,7 @@ export interface ModelConfigInput {
   protocol: ModelProtocol
   baseUrl: string
   model: string
+  network?: ModelNetworkConfig
   apiKey?: string
   clearApiKey?: boolean
 }
@@ -282,6 +286,7 @@ export interface ModelDiagnosticInput {
   protocol: ModelProtocol
   baseUrl: string
   model: string
+  network?: ModelNetworkConfig
   apiKey?: string
   kind: 'list' | 'test'
 }

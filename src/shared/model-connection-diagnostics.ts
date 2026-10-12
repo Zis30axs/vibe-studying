@@ -1,5 +1,13 @@
 /** Fixed diagnostic vocabulary. Never expose error messages, causes, addresses or headers. */
-export const connectionStages = ['dns', 'tls', 'connect', 'security', 'http', 'response'] as const
+export const connectionStages = [
+  'dns',
+  'tls',
+  'connect',
+  'proxy',
+  'security',
+  'http',
+  'response',
+] as const
 export type ConnectionStage = (typeof connectionStages)[number]
 export const connectionCodes = [
   'ENOTFOUND',
@@ -23,6 +31,11 @@ export const connectionCodes = [
   'ERR_SSL_WRONG_VERSION_NUMBER',
   'ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION',
   'ENDPOINT_NOT_PUBLIC',
+  'PROXY_CONFIG_INVALID',
+  'PROXY_UNSUPPORTED',
+  'PROXY_UNAVAILABLE',
+  'PROXY_AUTH_REQUIRED',
+  'PROXY_CONNECT_FAILED',
   'INVALID_HTTP_RESPONSE',
 ] as const
 export type ConnectionCode = (typeof connectionCodes)[number]
@@ -35,6 +48,7 @@ export const connectionStageLabels: Record<ConnectionStage, string> = {
   dns: 'DNS 解析',
   tls: 'TLS 安全连接',
   connect: '建立连接',
+  proxy: '代理连接',
   security: '目标地址安全检查',
   http: 'HTTP 响应',
   response: '读取响应',

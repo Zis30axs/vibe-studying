@@ -562,6 +562,11 @@ it.each([
   ['ERR_TLS_CERT_ALTNAME_INVALID', 'tls', 'tls'],
   ['SELF_SIGNED_CERT_IN_CHAIN', 'tls', 'tls'],
   ['ENDPOINT_NOT_PUBLIC', 'endpoint_blocked', 'security'],
+  ['PROXY_CONFIG_INVALID', 'proxy', 'proxy'],
+  ['PROXY_UNSUPPORTED', 'proxy', 'proxy'],
+  ['PROXY_UNAVAILABLE', 'proxy', 'proxy'],
+  ['PROXY_AUTH_REQUIRED', 'proxy', 'proxy'],
+  ['PROXY_CONNECT_FAILED', 'proxy', 'proxy'],
 ])(
   'preserves only allowlisted %s diagnostic metadata and never arbitrary errors',
   async (networkCode, code, stage) => {
