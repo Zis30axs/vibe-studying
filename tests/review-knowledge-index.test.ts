@@ -487,6 +487,8 @@ describe('persistent review-to-knowledge index', () => {
 })
 
 describe('review index with real content-addressed local PDF storage', () => {
+  // This real-worker integrity check includes bundling, PDF extraction and durable disk IO.
+  // Keep its functional assertions while allowing bounded cold-start time on Windows CI.
   it('verifies real PDF SHA, catches changed index text and source bytes, and never deletes PDF on unlink', async () => {
     const f = await fixture()
     const workerPath = resolve(`dist-electron/review-knowledge-test-${randomUUID()}.cjs`)
@@ -562,5 +564,5 @@ describe('review index with real content-addressed local PDF storage', () => {
     } finally {
       await rm(workerPath, { force: true })
     }
-  })
+  }, 60000)
 })
