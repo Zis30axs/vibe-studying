@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ModelService } from '../src/adapters/model-service'
-import { ModelTransport, isPublicAddress, validateBaseUrl } from '../src/adapters/model-transport'
+import { ModelTransport, validateBaseUrl } from '../src/adapters/model-transport'
 import { emptyDraft, type ModelProtocol, type Question } from '../src/shared/types'
 
 const key = 'synthetic-model-test-key-not-real'
@@ -60,6 +60,27 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((d) => rm(d, { recursive: true, force: true })))
 })
 describe.each(protocols)('%s mock-only protocol', (protocol) => {
+  it('sends Unicode model names unchanged in JSON and encodes Gemini path components', async () => {
+    const model = 'agy-抗截断-gemini-3.8-flash-low +备用'
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(response(envelope(protocol, { hint: 'A local hint' })))
+    const transport = new ModelTransport(
+      { protocol, baseUrl: 'http://localhost:11434/v1', model },
+      key,
+      fetcher,
+    )
+    await expect(transport.json('system', {})).resolves.toEqual({ hint: 'A local hint' })
+    expect(fetcher).toHaveBeenCalledOnce()
+    const [url, options] = fetcher.mock.calls[0]
+    const body = JSON.parse(String(options?.body))
+    if (protocol === 'gemini')
+      expect(url).toBe(
+        `http://localhost:11434/v1/models/${encodeURIComponent(model)}:generateContent`,
+      )
+    else expect(body.model).toBe(model)
+  })
+
   it('reviews with bounded validated scoring and sends only allowlisted data', async () => {
     const fetcher = vi
       .fn<typeof fetch>()
@@ -278,37 +299,35 @@ it('binds consent to revision; requires explicit consent; cancels matching IDs',
     ).configured,
   ).toBe(false)
 })
-it('rejects unsafe endpoints and private or special-use resolved addresses', () => {
+it('accepts ordinary HTTP(S) client URLs, including local services and custom ports', () => {
   for (const url of [
     'http://api.vendor.com',
-    'https://user:pass@api.vendor.com',
-    'https://api.vendor.com?key=x',
-    'https://localhost',
-    'https://127.0.0.1',
+    'http://localhost:11434/v1',
+    'https://127.0.0.1:8443/v1',
     'https://169.254.169.254',
-    'https://[::1]',
+    'http://[::1]:8080/v1',
     'https://api.local',
     'https://metadata.google.internal',
-    'https://api.vendor.com/#x',
+    'https://api.vendor.com:8443/custom/path.v2',
   ])
-    expect(() => validateBaseUrl(url)).toThrow()
-  for (const address of [
-    '127.0.0.1',
-    '10.1.1.1',
-    '172.16.0.1',
-    '192.168.1.1',
-    '169.254.169.254',
-    '100.64.0.1',
-    '::1',
-    '::ffff:127.0.0.1',
-    'fd00::1',
-    '2001:db8::1',
-  ])
-    expect(isPublicAddress(address)).toBe(false)
-  expect(isPublicAddress('8.8.8.8')).toBe(true)
+    expect(validateBaseUrl(url)).toBe(new URL(url).href.replace(/\/$/, ''))
   expect(validateBaseUrl('https://my.public-provider.com/v1/')).toBe(
     'https://my.public-provider.com/v1',
   )
+})
+
+it('rejects malformed or unsupported Base URL components', () => {
+  for (const url of [
+    'not a URL',
+    'ftp://api.vendor.com',
+    'https://user:pass@api.vendor.com',
+    'https://api.vendor.com?key=x',
+    'https://api.vendor.com/v1?',
+    'https://api.vendor.com/v1#',
+    'https://api.vendor.com/#x',
+    `https://api.vendor.com/${'x'.repeat(300)}`,
+  ])
+    expect(() => validateBaseUrl(url)).toThrow()
 })
 
 it('cancels an already-started advisor and bounds a stalled response body', async () => {

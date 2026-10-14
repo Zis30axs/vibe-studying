@@ -60,8 +60,6 @@ const diagnosticErrors: Record<string, string> = {
   response_interrupted: '已收到服务响应，但读取过程中连接中断。请检查网络或代理后重试。',
   dns: '无法解析服务域名，请检查接口地址的拼写和本机 DNS。',
   tls: 'TLS 安全连接失败，请检查系统时间、证书和网络代理；应用不会跳过证书验证。',
-  endpoint_blocked:
-    '域名解析到了非公网地址，已在发送前拦截。若使用 Clash Fake IP，请在网络连接方式中选择系统代理或指定本机 HTTP / mixed 代理；模型接口仍须为公网 HTTPS。',
   proxy:
     '所选代理不可用或不受支持。请检查 Clash 是否运行、系统是否提供本机 HTTP 代理，或指定 HTTP / mixed 端口；本次请求不会回退直连。',
   redirect_blocked:
@@ -72,7 +70,7 @@ const diagnosticErrors: Record<string, string> = {
     '该地址不支持模型列表接口。请核对接口地址；也可手动填写模型名称，再测试 API 连接。',
   invalid_response: '服务返回格式无效，请检查所选协议。',
   cancelled: '请求已取消。',
-  invalid_config: '模型配置无效，请检查公开 HTTPS 接口地址、协议和模型名称。',
+  invalid_config: '模型配置无效，请检查 HTTP(S) 接口地址、协议和模型名称。',
   incomplete_list: '模型列表过大或分页未完成，未使用不完整结果。请手动填写模型名称。',
 }
 interface Editor {
@@ -617,7 +615,7 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
                 </label>
               )}
               <p className="advisor-muted model-settings-wide" id="model-network-help">
-                Clash Fake IP 用户可选择系统代理或指定本机代理。仅支持 127.0.0.1 / [::1] 的 HTTP
+                按所选网络方式发送请求，支持本地接口与 Clash。指定代理支持 127.0.0.1 / [::1] 的 HTTP
                 代理（Clash 的 HTTP / mixed 端口，不是 SOCKS 端口）；按 Clash 中显示的端口填写。
                 代理失败不会自动回退直连，应用不会修改系统或 Clash
                 设置。此选项用于模型列表、连接测试及实际模型请求，保存后生效；下方诊断可直接测试当前选择。
@@ -740,10 +738,10 @@ export function ModelSettings({ api, state, onChange, navigationGuardRef }: Prop
                     失败阶段：{connectionStageLabels[diagnosticDetails.stage]}
                     {diagnosticDetails.networkCode ? ` · ${diagnosticDetails.networkCode}` : ''}
                     {diagnosticDetails.httpStatus ? ` · HTTP ${diagnosticDetails.httpStatus}` : ''}
-                    {['dns', 'connect', 'tls', 'security'].includes(diagnosticDetails.stage) && (
+                    {['dns', 'connect', 'tls'].includes(diagnosticDetails.stage) && (
                       <span style={{ display: 'block' }}>
                         {editor.network.mode === 'direct'
-                          ? '当前选择直连；Clash Fake IP 用户可选择系统代理或指定本机 HTTP / mixed 代理。'
+                          ? '当前选择直连；如需代理，可选择系统代理或指定本机 HTTP / mixed 端口。'
                           : '当前使用所选代理方式；请检查本机 HTTP / mixed 端口。代理失败不会自动回退直连。'}
                       </span>
                     )}

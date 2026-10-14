@@ -28,6 +28,20 @@ npm run test:packaged
 
 需要 Node.js **22.13+（推荐 24 LTS）**、npm，以及支持 Electron 的桌面系统。首次安装/启动需要联网下载 npm 依赖与 Electron 二进制。
 
+Windows 可在项目目录直接运行 `run.ps1`，无需先手动构建。脚本会自动切换到项目目录，缺少依赖时安装开发依赖，然后启动开发模式；界面修改支持热更新，主进程修改后重新运行脚本即可。
+
+```powershell
+.\run.ps1
+```
+
+若 PowerShell 提示脚本执行被策略阻止，可仅为这次启动运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1
+```
+
+开发模式会自动生成运行所需的 Electron 主进程文件，不执行完整生产构建或打包。关闭应用或按 `Ctrl+C` 结束运行。
+
 ```sh
 git clone https://github.com/Zis30axs/vibe-studying.git
 cd vibe-studying
@@ -262,14 +276,16 @@ node dist-mcp/server.cjs --subject geography --tag 经纬网
 
 ## 自定义模型与 Ask Advisor（可选）
 
-默认仍为离线本地规则。在“题库与 Agent → 模型设置”中选择协议、HTTPS 基础地址和模型名，填写本次会话 API Key。支持 Anthropic Messages、Gemini generateContent、OpenAI Responses 和 OpenAI Chat Completions 兼容接口。
+默认仍为离线本地规则。在“题库与 Agent → 模型设置”中选择协议、HTTP/HTTPS 基础地址和模型名，填写本次会话 API Key。支持 Anthropic Messages、Gemini generateContent、OpenAI Responses 和 OpenAI Chat Completions 兼容接口。
 
 - Anthropic 基础地址示例：`https://api.anthropic.com/v1`，追加 `/messages`。
 - Gemini 示例：`https://generativelanguage.googleapis.com/v1beta`，追加 `/models/{model}:generateContent`。
 - OpenAI 示例：`https://api.openai.com/v1`，追加 `/responses` 或 `/chat/completions`。
 - DeepSeek 可继续使用 Chat Completions 协议与 `https://api.deepseek.com`。已有 DeepSeek 启动配置保留兼容迁移。
 
-请填写基础地址而非完整调用路径。仅支持公开 HTTPS 服务，拒绝内网地址、带认证信息或查询参数的 URL；不自动跟随重定向，连接时检查 DNS 地址。模型需支持相应协议及 JSON 输出；工具调用、拒绝、截断、不支持的输出与结构错误会明确失败，不将其写成成绩。协议支持不保证任意模型、代理服务或推理模式都兼容。
+请填写基础地址而非完整调用路径。支持 HTTP/HTTPS、localhost、私网、IP、自定义端口和普通路径；不接受 URL 内嵌账号密码、查询参数或片段，密钥通过鉴权头发送。模型连接不再预先解析 DNS 或按公网、私网、Fake-IP 分类拦截，仍不自动跟随重定向。模型需支持相应协议及 JSON 输出；工具调用、拒绝、截断、不支持的输出与结构错误会明确失败，不将其写成成绩。协议支持不保证任意模型、代理服务或推理模式都兼容。
+
+模型 ID 可含中文、空格和普通符号，去掉首尾空格后为 1–120 个字符，不接受控制字符。
 
 模型设置支持具名配置，可分别为“父代理（正式阅卷与出题）”和“子代理（选文 Advisor 与模块检查）”分配配置。主模型还在“Agent 工作台”中执行有界原生工具调用，可将选文提示与模块检查委派给子模型处理；启用公开联网时，子模型也可在共享额度内调用网络工具并续接一次；不允许无限递归或任意代理创建。保存与切换不调用服务；每次发送仍显示实际配置和接收方，学习内容授权可单次同意或明确选择本机记住。
 
@@ -277,7 +293,9 @@ API Key 默认以密码输入框隐藏，保存后立即清空，不提供读取
 
 配置文件 `model-profiles.json` 只包含非秘密元数据与操作系统加密密文；学习记录、浏览器存储和返回给界面的配置投影不含密钥或密文。留空保留既有密钥，修改协议或接口地址会清除旧密钥，模型名改变仍可沿用同接收方密钥。删除配置同时移除其中密钥；受影响的角色切到第一个剩余配置。已有 `model-config.json` 的非秘密配置自动兼容迁移，原有启动环境变量密钥仅在尚未保存新配置时作会话引导，不自动持久化；一旦保存新配置，启动变量不会覆盖或复活用户保存、替换或清除的密钥。
 
-“获取模型”只在点击时向当前接收方读取列表，可搜索选择，也可继续手动填写 Model ID；获取成功不等于所选模型可调用。列表最多读取 5 页/500 项，超限会提示手动输入，不默认为完整结果。“测试 API 连接”发送固定、极短、最多 32 输出 token 的测试请求，不发送题目、答案、教材或学习记录，可能产生少量费用。返回耗时或鉴权、模型/接口、额度/限流、超时等分类错误，不显示服务端原始响应。测试成功不保证复杂任务或 JSON 输出兼容。两者都不会自动保存配置或后台轮询；取消、改配置、切换或删除会使旧结果失效。 获取模型不需要先选择模型；例如 `https://api.vendor.com/v1` 请求 `GET /v1/models`。模型列表接口返回 404/405/501 时，可核对基础地址，或手动填写模型名称再测试。诊断会区分 DNS、TLS、连接、非公网地址拦截与 HTTP 错误，并显示固定网络错误码或 HTTP 状态，不显示服务商原始错误或密钥。每个模型配置可明确选择直连、系统代理或本机 HTTP/混合代理。旧配置默认直连；使用 Clash Fake-IP 时可选择系统代理或填写已有本机代理端口。代理路径仍验证目标域名和 TLS 证书，只对经本机代理的域名允许 198.18.0.0/15 Fake-IP，其他私网地址继续拦截；代理失败不会自动直连。获取模型、连接测试和实际模型请求使用相同网络选择。详见 [模型连接与 Clash Verge](docs/model-network.md)。
+“获取模型”只在点击时向当前接收方读取列表，可搜索选择，也可继续手动填写 Model ID；获取成功不等于所选模型可调用。列表最多读取 5 页/500 项，超限会提示手动输入，不默认为完整结果。“测试 API 连接”发送固定、极短、最多 32 输出 token 的测试请求，不发送题目、答案、教材或学习记录，可能产生少量费用。返回耗时或鉴权、模型/接口、额度/限流、超时等分类错误，不显示服务端原始响应。测试成功不保证复杂任务或 JSON 输出兼容。两者都不会自动保存配置或后台轮询；取消、改配置、切换或删除会使旧结果失效。获取模型不需要先选择模型；例如 `https://api.vendor.com/v1` 请求 `GET /v1/models`。模型列表接口返回 404/405/501 时，可核对基础地址，或手动填写模型名称再测试。诊断会区分 DNS、TLS、连接与 HTTP 错误，并显示固定网络错误码或 HTTP 状态，不显示服务商原始错误或密钥。
+
+每个模型配置可明确选择直连、系统代理或本机 HTTP/混合代理。旧配置默认直连，使用普通 Node HTTP(S) 和默认 DNS，可由 Clash TUN 路由；系统代理读取当前系统路线，本机代理使用已有 HTTP/混合端口。HTTPS 目标经 CONNECT 使用原主机和实际端口并正常验证证书，HTTP 目标向代理发送完整 URL。代理失败不会自动直连，请求不自动重试，超时或取消会终止连接。获取模型、连接测试和实际模型请求使用相同网络选择。详见 [模型连接与 Clash Verge](docs/model-network.md)。
 
 配置变更会取消未完成模型调用并丢弃旧结果；若接收方或发送数据类别有变化，需要重新确认授权。所有网络与加解密均在主进程执行，保存操作不会联网。不要把密钥放进聊天、答案、配置名称或考纲中。安全存储语义见 [Electron safeStorage](https://www.electronjs.org/docs/latest/api/safe-storage)。
 

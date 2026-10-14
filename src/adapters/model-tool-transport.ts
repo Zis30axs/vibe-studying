@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
+import { modelIdSchema } from '../shared/model-id'
 import type {
   NativeToolTurn,
   ToolCall,
@@ -202,11 +203,7 @@ export class ModelToolTransport {
       this.config = {
         protocol: protocolSchema.parse(config.protocol),
         baseUrl: validateBaseUrl(config.baseUrl),
-        model: z
-          .string()
-          .trim()
-          .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/)
-          .parse(config.model),
+        model: modelIdSchema.parse(config.model),
       }
     } catch {
       throw new TransportFailure('envelope')

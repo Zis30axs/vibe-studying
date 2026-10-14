@@ -428,6 +428,32 @@ describe('model network configuration', () => {
 })
 
 describe('named model profiles: encrypted persistence and public projection', () => {
+  it('restores a local endpoint and a provider model name containing Chinese and ordinary symbols', async () => {
+    const encryption = secureStorage()
+    const { models, directory, restart } = await setup({ secureStorage: encryption })
+    const model = 'agy-抗截断-gemini-3.8-flash-low + search'
+    let state = await models.saveProfile(
+      profileInput(await models.getProfiles(), {
+        baseUrl: 'http://localhost:11434/v1/',
+        model,
+      }),
+    )
+    const profile = state.profiles.find((item) => item.model === model)!
+    state = await models.assignProfiles({
+      expectedRevision: state.revision,
+      roles: { parent: profile.profileId, child: profile.profileId },
+    })
+    const restored = restart()
+    expect(await restored.getConfig()).toMatchObject({
+      baseUrl: 'http://localhost:11434/v1',
+      model,
+      configured: true,
+    })
+    // Native-tool calls must accept the same saved ID as model discovery and JSON tasks.
+    await expect(restored.agentTransport(state.revision)).resolves.toHaveProperty('transport')
+    await assertNoPlaintext(directory)
+  })
+
   it('migrates legacy non-secret metadata to a stable default without inventing a key', async () => {
     const { models, directory, restart } = await setup()
     await writeFile(

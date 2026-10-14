@@ -1,11 +1,10 @@
-import { lookup } from 'node:dns/promises'
 import { request as httpRequest, type ClientRequest, type IncomingMessage } from 'node:http'
 import { Agent, request as httpsRequest } from 'node:https'
 import { isIP, type Socket } from 'node:net'
 import { Readable } from 'node:stream'
 import { checkServerIdentity, connect as tlsConnect, type TLSSocket } from 'node:tls'
 import { modelNetworkSchema, type ModelNetworkConfig } from '../shared/model-network'
-import { isPublicAddress, secureFetch, validateBaseUrl } from './model-transport'
+import { secureFetch, validateBaseUrl } from './model-transport'
 
 export type SystemProxyResolver = (url: string) => Promise<string>
 
@@ -22,7 +21,7 @@ function checkAborted(signal?: AbortSignal | null): void {
   if (signal?.aborted) throw abortError()
 }
 
-/** DNS/PAC lookups are not cancellable; prevent their late completion from opening a connection. */
+/** System proxy resolution is not cancellable; ignore completion after cancellation. */
 function untilAborted<T>(operation: Promise<T>, signal?: AbortSignal | null): Promise<T> {
   if (!signal) return operation
   return new Promise<T>((resolve, reject) => {
@@ -31,13 +30,6 @@ function untilAborted<T>(operation: Promise<T>, signal?: AbortSignal | null): Pr
     operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
     if (signal.aborted) abort()
   })
-}
-
-/** Clash's default Fake-IP range is accepted only behind an explicitly chosen loopback proxy. */
-export function isClashFakeAddress(address: string): boolean {
-  if (isIP(address) !== 4) return false
-  const [first, second] = address.split('.').map(Number)
-  return first === 198 && (second === 18 || second === 19)
 }
 
 function validatedTarget(input: Parameters<typeof fetch>[0]): URL {
@@ -50,7 +42,7 @@ function validatedTarget(input: Parameters<typeof fetch>[0]): URL {
     if (url.username || url.password || url.hash || url.href.length > 4096) throw new Error()
     return url
   } catch {
-    throw networkError('ENDPOINT_NOT_PUBLIC')
+    throw networkError('ENDPOINT_INVALID')
   }
 }
 
@@ -77,15 +69,6 @@ function systemRoute(value: string): URL | undefined {
   }
 }
 
-async function guardProxyDestination(url: URL, signal?: AbortSignal | null): Promise<void> {
-  checkAborted(signal)
-  const addresses = await untilAborted(lookup(url.hostname, { all: true }), signal)
-  checkAborted(signal)
-  if (!addresses.length) throw networkError('DNS_NO_ADDRESS')
-  if (addresses.some(({ address }) => !isPublicAddress(address) && !isClashFakeAddress(address)))
-    throw networkError('ENDPOINT_NOT_PUBLIC')
-}
-
 function responseFromNode(response: IncomingMessage): Response {
   const headers = new Headers()
   for (const [key, value] of Object.entries(response.headers))
@@ -99,7 +82,7 @@ function responseFromNode(response: IncomingMessage): Response {
   })
 }
 
-/** One CONNECT + verified TLS session per request; there is no retry, redirect or connection pool. */
+/** HTTP uses an absolute URL; HTTPS uses CONNECT with normal certificate verification. */
 function proxyFetch(url: URL, proxy: URL, init?: RequestInit): Promise<Response> {
   return new Promise((resolve, reject) => {
     let connectRequest: ClientRequest | undefined
@@ -130,6 +113,18 @@ function proxyFetch(url: URL, proxy: URL, init?: RequestInit): Promise<Response>
       dispose()
     }
     const abort = () => fail(abortError())
+    const receive = (reply: IncomingMessage) => {
+      response = reply
+      reply.once('error', fail)
+      reply.once('close', dispose)
+      try {
+        const result = responseFromNode(reply)
+        settled = true
+        resolve(result)
+      } catch {
+        fail(networkError('INVALID_HTTP_RESPONSE'))
+      }
+    }
     try {
       checkAborted(signal)
       const method = init?.method?.toUpperCase() ?? 'POST'
@@ -142,7 +137,25 @@ function proxyFetch(url: URL, proxy: URL, init?: RequestInit): Promise<Response>
       if (['host', 'proxy-authorization', 'proxy-connection'].some((header) => headers.has(header)))
         throw networkError('INVALID_HTTP_REQUEST')
       signal?.addEventListener('abort', abort, { once: true })
-      const authority = `${url.hostname}:443`
+      if (url.protocol === 'http:') {
+        request = httpRequest(
+          {
+            hostname: proxy.hostname.replace(/^\[|\]$/g, ''),
+            port: Number(proxy.port || 80),
+            method,
+            path: url.href,
+            headers: { ...Object.fromEntries(headers), Host: url.host },
+            agent: false,
+            maxHeaderSize: 16384,
+          },
+          receive,
+        )
+        request.once('error', fail)
+        request.setTimeout(60000, () => fail(networkError('ETIMEDOUT')))
+        request.end(method === 'GET' ? undefined : init?.body)
+        return
+      }
+      const authority = `${url.hostname}:${url.port || 443}`
       connectRequest = httpRequest({
         hostname: proxy.hostname.replace(/^\[|\]$/g, ''),
         port: Number(proxy.port || 80),
@@ -170,9 +183,11 @@ function proxyFetch(url: URL, proxy: URL, init?: RequestInit): Promise<Response>
           return
         }
         connectRequest?.setTimeout(0)
+        const hostname = url.hostname.replace(/^\[|\]$/g, '')
         tlsSocket = tlsConnect({
           socket,
-          servername: url.hostname,
+          host: hostname,
+          servername: isIP(hostname) ? undefined : hostname,
           rejectUnauthorized: true,
           checkServerIdentity,
           ALPNProtocols: ['http/1.1'],
@@ -194,18 +209,7 @@ function proxyFetch(url: URL, proxy: URL, init?: RequestInit): Promise<Response>
             request = httpsRequest(
               url,
               { method, headers: Object.fromEntries(headers), agent, maxHeaderSize: 16384 },
-              (reply) => {
-                response = reply
-                reply.once('error', fail)
-                reply.once('close', dispose)
-                try {
-                  const result = responseFromNode(reply)
-                  settled = true
-                  resolve(result)
-                } catch {
-                  fail(networkError('INVALID_HTTP_RESPONSE'))
-                }
-              },
+              receive,
             )
             request.once('error', fail)
             request.end(method === 'GET' ? undefined : init?.body)
@@ -222,9 +226,8 @@ function proxyFetch(url: URL, proxy: URL, init?: RequestInit): Promise<Response>
 }
 
 /**
- * The explicit loopback proxy is a trusted routing/DNS boundary. Only it receives CONNECT's
- * hostname; API headers/body are written after destination TLS verification. Local private DNS
- * answers remain blocked, and no proxy failure falls back to the direct transport.
+ * The selected route resolves and connects to the destination normally. Proxy requests do not
+ * perform local destination DNS checks, and a failed proxy never falls back to a direct request.
  */
 export function createModelFetch(
   network?: ModelNetworkConfig,
@@ -252,7 +255,6 @@ export function createModelFetch(
       proxy = systemRoute(route)
     }
     if (!proxy) return secureFetch(url.href, init)
-    await guardProxyDestination(url, init?.signal)
     return proxyFetch(url, proxy, init)
   }
 }

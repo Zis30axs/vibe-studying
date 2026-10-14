@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { Readable } from 'node:stream'
 import { request } from 'node:https'
-import { lookup } from 'node:dns'
 import type { ModelProtocol } from '../src/shared/types'
 import {
   listRemoteModels,
@@ -12,7 +11,6 @@ import {
 import { secureFetch } from '../src/adapters/model-transport'
 
 vi.mock('node:https', () => ({ request: vi.fn() }))
-vi.mock('node:dns', () => ({ lookup: vi.fn() }))
 
 const key = 'synthetic-diagnostic-key-never-real'
 const protocols: ModelProtocol[] = ['anthropic', 'gemini', 'openai-responses', 'openai-chat']
@@ -81,6 +79,36 @@ function listEnvelope(protocol: ModelProtocol) {
 afterEach(() => vi.clearAllMocks())
 
 describe.each(protocols)('%s diagnostics with synthetic credentials', (protocol) => {
+  it('lists Unicode model IDs and can probe the selected ID without changing it', async () => {
+    const ids = ['agy-抗截断-gemini-3.8-flash-low', '模型 A+preview']
+    const listing =
+      protocol === 'gemini'
+        ? {
+            models: ids.map((id) => ({
+              name: `models/${id}`,
+              supportedGenerationMethods: ['generateContent'],
+            })),
+          }
+        : { data: ids.map((id) => ({ id })) }
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response(listing))
+      .mockResolvedValueOnce(response(envelope(protocol)))
+    const models = await listRemoteModels({ ...config(protocol), model: '' }, key, { fetchImpl })
+    expect(models).toEqual(ids.map((id) => ({ id })))
+    const model = models[1].id
+    await expect(
+      testModelConnection({ ...config(protocol), model }, key, { fetchImpl }),
+    ).resolves.toHaveProperty('latencyMs')
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    const [url, options] = fetchImpl.mock.calls[1]
+    if (protocol === 'gemini')
+      expect(url).toBe(
+        `https://api.vendor.com/v1/models/${encodeURIComponent(model)}:generateContent`,
+      )
+    else expect(JSON.parse(String(options?.body)).model).toBe(model)
+  })
+
   it('lists models with protocol authentication, no request body and an allowlisted result', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(response(listEnvelope(protocol)))
     expect(await listRemoteModels({ ...config(protocol), model: '' }, key, { fetchImpl })).toEqual([
@@ -294,7 +322,9 @@ it('reports incomplete lists instead of silently truncating at page, count or un
 it('rejects invalid pagination, names and model IDs; permits a valid empty list', async () => {
   for (const body of [
     { data: [{ id: 'valid' }], has_more: true },
-    { data: [{ id: 'bad id' }] },
+    { data: [{ id: '' }] },
+    { data: [{ id: 'bad\nmodel' }] },
+    { data: [{ id: 'x'.repeat(121) }] },
     { data: [{ id: 'valid', display_name: 'bad\nname' }] },
     { data: 'not-an-array' },
   ]) {
@@ -376,11 +406,11 @@ it.each([listRemoteModels, testModelConnection])(
   async (operation) => {
     const fetchImpl = vi.fn<typeof fetch>()
     for (const baseUrl of [
-      'http://api.vendor.com',
-      'https://127.0.0.1',
-      'https://api.local',
+      'not a URL',
+      'ftp://api.vendor.com',
       'https://user:pass@api.vendor.com',
       'https://api.vendor.com?key=secret',
+      'https://api.vendor.com/#fragment',
     ]) {
       await expect(operation({ ...config(), baseUrl }, key, { fetchImpl })).rejects.toMatchObject({
         code: 'invalid_config',
@@ -515,7 +545,7 @@ it('rejects incomplete or empty responses without positive output-token evidence
   }
 })
 
-it('uses HTTPS GET without a body and retains DNS checks in the production transport', async () => {
+it('uses HTTPS GET without a body or a custom DNS check in the production transport', async () => {
   const end = vi.fn()
   let actualOptions: any
   vi.mocked(request).mockImplementation(((
@@ -541,15 +571,8 @@ it('uses HTTPS GET without a body and retains DNS checks in the production trans
   expect(await result.json()).toEqual({ data: [] })
   expect(actualOptions.method).toBe('GET')
   expect(end).toHaveBeenCalledWith(undefined)
-  const callback = vi.fn()
-  vi.mocked(lookup).mockImplementation(((_host: string, _options: unknown, done: Function) =>
-    done(null, [{ address: '127.0.0.1', family: 4 }])) as typeof lookup)
-  actualOptions.lookup('api.vendor.com', { all: true }, callback)
-  expect(callback).toHaveBeenCalledWith(expect.any(Error), [], undefined)
-  vi.mocked(lookup).mockImplementation(((_host: string, _options: unknown, done: Function) =>
-    done(null, [{ address: '8.8.8.8', family: 4 }])) as typeof lookup)
-  actualOptions.lookup('api.vendor.com', { all: true }, callback)
-  expect(callback).toHaveBeenLastCalledWith(null, [{ address: '8.8.8.8', family: 4 }])
+  expect(actualOptions).not.toHaveProperty('lookup')
+  expect(actualOptions).not.toHaveProperty('rejectUnauthorized', false)
 })
 
 it.each([
@@ -561,7 +584,7 @@ it.each([
   ['CERT_HAS_EXPIRED', 'tls', 'tls'],
   ['ERR_TLS_CERT_ALTNAME_INVALID', 'tls', 'tls'],
   ['SELF_SIGNED_CERT_IN_CHAIN', 'tls', 'tls'],
-  ['ENDPOINT_NOT_PUBLIC', 'endpoint_blocked', 'security'],
+  ['ENDPOINT_INVALID', 'invalid_config', 'connect'],
   ['PROXY_CONFIG_INVALID', 'proxy', 'proxy'],
   ['PROXY_UNSUPPORTED', 'proxy', 'proxy'],
   ['PROXY_UNAVAILABLE', 'proxy', 'proxy'],
@@ -614,32 +637,20 @@ it.each([404, 405, 501])(
   },
 )
 
-it.each([
-  ['ENOTFOUND', [], 'dns', 'ENOTFOUND'],
-  [null, [], 'dns', 'DNS_NO_ADDRESS'],
-  [null, [{ address: '198.18.0.2', family: 4 }], 'endpoint_blocked', 'ENDPOINT_NOT_PUBLIC'],
-  [null, [{ address: '127.0.0.1', family: 4 }], 'endpoint_blocked', 'ENDPOINT_NOT_PUBLIC'],
-])(
-  'preserves DNS and safety failures through the actual HTTPS lookup: %s %j',
-  async (lookupCode, addresses, code, networkCode) => {
-    vi.mocked(lookup).mockImplementation(((_host: string, _options: unknown, done: Function) =>
-      done(
-        lookupCode ? Object.assign(new Error(key), { code: lookupCode }) : null,
-        addresses,
-      )) as typeof lookup)
-    vi.mocked(request).mockImplementation(((_url: unknown, options: any) => {
+it.each(['ENOTFOUND', 'EAI_AGAIN'])(
+  'preserves default HTTPS DNS error %s without exposing connection details',
+  async (networkCode) => {
+    vi.mocked(request).mockImplementation(((_url: unknown, options: unknown) => {
+      expect(options).not.toHaveProperty('lookup')
       const req = new EventEmitter() as EventEmitter & { end: () => void }
-      req.end = () =>
-        options.lookup('custom.vendor.com', { all: true }, (error: Error) =>
-          req.emit('error', error),
-        )
+      req.end = () => req.emit('error', Object.assign(new Error(key), { code: networkCode }))
       return req
     }) as unknown as typeof request)
     const result = await listRemoteModels(
       { ...config(), baseUrl: 'https://custom.vendor.com/v1', model: '' },
       key,
     ).catch((error: unknown) => error)
-    expect(result).toMatchObject({ code, details: { networkCode } })
+    expect(result).toMatchObject({ code: 'dns', details: { stage: 'dns', networkCode } })
     expect(JSON.stringify(result)).not.toContain(key)
   },
 )

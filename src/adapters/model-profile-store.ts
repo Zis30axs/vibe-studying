@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { AtomicJsonStore, readJsonFile } from './atomic-json-store'
 import { protocolSchema, validateBaseUrl } from './model-transport'
 import { modelNetworkSchema } from '../shared/model-network'
+import { modelIdSchema } from '../shared/model-id'
 import type {
   ModelConfig,
   ModelConfigInput,
@@ -23,10 +24,7 @@ export const modelMetadataSchema = z.strictObject({
   protocol: protocolSchema,
   baseUrl: z.string().transform(validateBaseUrl),
   network: modelNetworkSchema.default({ mode: 'direct' }),
-  model: z
-    .string()
-    .trim()
-    .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/),
+  model: modelIdSchema,
 })
 export const modelKeySchema = z
   .string()
@@ -108,6 +106,7 @@ export class ModelProfileStore {
       } catch (error) {
         if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT'))
           throw new Error('无法读取模型配置；原文件未覆盖，请恢复备份。')
+        const bootstrapModel = modelIdSchema.safeParse(this.options.model)
         const legacy = await new AtomicJsonStore<z.infer<typeof legacySchema>>(
           join(this.directory, 'model-config.json'),
           legacySchema,
@@ -115,10 +114,7 @@ export class ModelProfileStore {
             protocol: 'openai-chat',
             baseUrl: 'https://api.deepseek.com',
             network: { mode: 'direct' },
-            model:
-              this.options.model && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(this.options.model)
-                ? this.options.model
-                : 'deepseek-flash',
+            model: bootstrapModel.success ? bootstrapModel.data : 'deepseek-flash',
             revision: 0,
           }),
         ).load()

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { canonicalModelBaseUrl } from './model-endpoint'
 
 /** A grant authorizes a data category, never automatically selects data for a request. */
 export const modelConsentScopes = [
@@ -60,34 +61,9 @@ export const modelConsentDescriptions: Record<ModelConsentScope, string> = {
     'Agent 教材检索：每次明确选定的教材和物理 PDF 页码范围内，由工具检索得到的有限摘录、书名和页码；结果会回传给主模型',
 }
 
-/** Browser-safe counterpart of the transport's endpoint validation. Path remains part
- * of the recipient identity; model and role deliberately do not. DNS is checked by
- * the transport, never by the consent UI or persistence layer. */
+/** Path, scheme and port remain part of the recipient identity; model and role do not. */
 export function canonicalModelConsentBaseUrl(input: string): string {
-  try {
-    const url = new URL(input)
-    if (
-      input.length > 300 ||
-      url.protocol !== 'https:' ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash ||
-      (url.port && url.port !== '443') ||
-      /^\d+\.\d+\.\d+\.\d+$/.test(url.hostname) ||
-      url.hostname.includes(':') ||
-      !url.hostname.includes('.') ||
-      /(^|\.)(localhost|local|internal|test|invalid|example|lan|home|metadata|onion)$/.test(
-        url.hostname,
-      ) ||
-      !/^[a-z0-9.-]+$/.test(url.hostname) ||
-      !/^\/[A-Za-z0-9/_-]*$/.test(url.pathname)
-    )
-      throw new Error()
-    return url.href.replace(/\/$/, '')
-  } catch {
-    throw new Error('请输入公开服务的 HTTPS Base URL，不含认证信息、查询参数或内网地址。')
-  }
+  return canonicalModelBaseUrl(input)
 }
 const receiverSchema = z.string().transform((value, ctx) => {
   try {

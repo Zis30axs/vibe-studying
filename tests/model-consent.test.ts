@@ -119,15 +119,15 @@ describe('explicit local model consent persistence', () => {
     expect((await new ModelConsentStore(directory).getModelConsents()).grants).toEqual([])
     expect((await readdir(directory)).filter((name) => name.endsWith('.tmp'))).toEqual([])
   })
-  it('rejects unknown fields/categories, empty grants, duplicate scopes and unsafe recipients', async () => {
+  it('rejects unknown fields/categories, empty grants, duplicate scopes and invalid recipients', async () => {
     const { store } = await setup()
     for (const input of [
       { baseUrl: first, scopes: [] },
       { baseUrl: first, scopes: ['all'] },
       { baseUrl: first, scopes: ['advisor', 'advisor'] },
       { baseUrl: first, scopes: ['advisor'], apiKey: 'synthetic-never-real' },
-      { baseUrl: 'http://first.vendor.com', scopes: ['advisor'] },
-      { baseUrl: 'https://127.0.0.1', scopes: ['advisor'] },
+      { baseUrl: 'file:///local-model', scopes: ['advisor'] },
+      { baseUrl: 'https://user:password@first.vendor.com', scopes: ['advisor'] },
       { baseUrl: 'https://first.vendor.com/?key=synthetic', scopes: ['advisor'] },
     ]) {
       expect(modelConsentGrantSchema.safeParse(input).success).toBe(false)
@@ -155,18 +155,24 @@ describe('explicit local model consent persistence', () => {
       'https://FIRST.vendor.com:443/v1/',
       'https://api.deepseek.com',
       'https://api.vendor.com/v1//',
+      'http://first.vendor.com',
+      'http://localhost:11434/v1/',
+      'https://localhost',
+      'https://127.0.0.1',
+      'http://[::1]:11434/v1',
+      'https://api.vendor.com:444',
+      'https://api.internal',
+      'https://api.vendor.com/api.v1/my%20model/',
     ])
       expect(canonicalModelConsentBaseUrl(value)).toBe(validateBaseUrl(value))
     for (const value of [
-      'http://first.vendor.com',
-      'https://localhost',
-      'https://127.0.0.1',
-      'https://[::1]',
-      'https://api.vendor.com:444',
+      'file:///model',
+      'not a URL',
       'https://user:password@api.vendor.com',
       'https://api.vendor.com?q=1',
+      'https://api.vendor.com/v1?',
       'https://api.vendor.com#fragment',
-      'https://api.internal',
+      'https://api.vendor.com/v1#',
     ]) {
       expect(() => canonicalModelConsentBaseUrl(value)).toThrow()
       expect(() => validateBaseUrl(value)).toThrow()
@@ -179,6 +185,20 @@ describe('explicit local model consent persistence', () => {
         grants: [...granted().grants, ...granted().grants],
       }).success,
     ).toBe(false)
+  })
+  it('persists local model recipients without sharing consent across protocols, ports or paths', async () => {
+    const { store, directory } = await setup()
+    const receiver = 'http://localhost:11434/v1'
+    await store.grantModelConsent({ baseUrl: `${receiver}/`, scopes: ['advisor'] })
+    const restored = new ModelConsentStore(directory)
+    expect(await restored.hasConsent(receiver, ['advisor'])).toBe(true)
+    for (const other of [
+      'https://localhost:11434/v1',
+      'http://localhost:11435/v1',
+      'http://localhost:11434/other',
+      'http://127.0.0.1:11434/v1',
+    ])
+      expect(await restored.hasConsent(other, ['advisor'])).toBe(false)
   })
 })
 

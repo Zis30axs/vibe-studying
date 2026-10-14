@@ -162,7 +162,7 @@ export function safeModelDebugPaths(paths: readonly (readonly PropertyKey[])[]):
 export function safeModelDebugModel(model: unknown, secret?: string): string {
   if (
     typeof model !== 'string' ||
-    !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/.test(model) ||
+    !/^[^\u0000-\u001f\u007f]{1,120}$/.test(model) ||
     model.includes('://') ||
     /(?:^|[/:-])(?:sk-|AIza|Bearer|ghp_|github_pat_|eyJ)/i.test(model) ||
     (secret && model.includes(secret))

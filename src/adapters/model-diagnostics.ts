@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { modelIdSchema } from '../shared/model-id'
 import {
   safeConnectionCode,
   sanitizeConnectionDetails,
@@ -38,8 +39,6 @@ const messages = {
   tls: 'TLS 安全连接失败，请检查系统时间、证书和网络代理；应用不会跳过证书验证。',
   proxy:
     '代理不可用或不受支持。请选择本机 HTTP / 混合代理端口；不支持远程代理、SOCKS 或代理认证，失败不会自动改为直连。',
-  endpoint_blocked:
-    '域名解析到了非公网地址，已在发送前拦截。使用 Clash Fake-IP 时，请在网络连接中选择系统代理或本机代理；其他私网地址仍被阻止。',
   redirect_blocked:
     '接口返回了重定向，已停止请求以避免将密钥转发到其他地址。请使用服务商提供的最终 API Base URL。',
   server: '已连接到服务，但服务返回了服务器错误。请稍后重试或联系服务商。',
@@ -48,7 +47,7 @@ const messages = {
     '该地址不支持模型列表接口。请核对 Base URL；也可手动填写模型名称，再测试 API 连接。',
   invalid_response: '服务返回格式无效或未生成有效响应，请检查所选协议。',
   cancelled: '请求已取消。',
-  invalid_config: '模型配置无效，请检查公开 HTTPS Base URL、协议和 Model ID。',
+  invalid_config: '模型配置无效，请检查 HTTP(S) Base URL、协议和 Model ID。',
   incomplete_list: '模型列表过大或分页未完成，未使用不完整结果。请手动填写 Model ID。',
 } as const
 export type ModelDiagnosticErrorCode = keyof typeof messages
@@ -65,10 +64,6 @@ export class ModelDiagnosticError extends ModelTransportError {
   }
 }
 
-const modelId = z
-  .string()
-  .trim()
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/)
 const modelName = z
   .string()
   .trim()
@@ -87,7 +82,7 @@ function validatedConfig(config: ModelDiagnosticConfig, requireModel: boolean) {
       protocol: protocolSchema.parse(config.protocol),
       baseUrl: validateBaseUrl(config.baseUrl),
       // Fetching models must work before the user has chosen a model.
-      model: requireModel ? modelId.parse(config.model) : '',
+      model: requireModel ? modelIdSchema.parse(config.model) : '',
     }
   } catch {
     throw new ModelDiagnosticError('invalid_config')
@@ -180,9 +175,9 @@ function connectionFailure(error: unknown): ModelDiagnosticError {
         ['ENOTFOUND', 'EAI_AGAIN', 'EAI_FAIL', 'DNS_LOOKUP_FAILED', 'DNS_NO_ADDRESS'].includes(code)
       )
         return new ModelDiagnosticError('dns', { stage: 'dns', networkCode: code })
-      if (code === 'ENDPOINT_NOT_PUBLIC')
-        return new ModelDiagnosticError('endpoint_blocked', {
-          stage: 'security',
+      if (code === 'ENDPOINT_INVALID')
+        return new ModelDiagnosticError('invalid_config', {
+          stage: 'connect',
           networkCode: code,
         })
       if (code === 'INVALID_HTTP_RESPONSE')
@@ -351,14 +346,14 @@ export async function listRemoteModels(
         entries = result.models
           .filter((model) => model.supportedGenerationMethods.includes('generateContent'))
           .map((model) => ({
-            id: modelId.parse(model.name.slice(7)),
+            id: modelIdSchema.parse(model.name.slice(7)),
             ...(model.displayName ? { name: model.displayName } : {}),
           }))
         next = result.nextPageToken
       } else {
         const result = z
           .object({
-            data: z.array(z.object({ id: modelId, display_name: modelName.optional() })),
+            data: z.array(z.object({ id: modelIdSchema, display_name: modelName.optional() })),
             has_more: z.boolean().optional(),
             last_id: z.string().min(1).max(2048).nullable().optional(),
           })

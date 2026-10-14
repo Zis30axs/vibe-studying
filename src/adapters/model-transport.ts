@@ -1,11 +1,11 @@
-import { safeConnectionCode } from '../shared/model-connection-diagnostics'
 import { containsCredentialText } from './credential-reflection'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
-import { lookup } from 'node:dns'
-import { isIP } from 'node:net'
-import { request } from 'node:https'
+import { request as httpRequest } from 'node:http'
+import { request as httpsRequest } from 'node:https'
 import { Readable } from 'node:stream'
+import { canonicalModelBaseUrl } from '../shared/model-endpoint'
+import { modelIdSchema } from '../shared/model-id'
 import type { ModelProtocol } from '../shared/types'
 import {
   safeModelDebugModel,
@@ -20,73 +20,19 @@ import {
 
 export const protocolSchema = z.enum(['anthropic', 'gemini', 'openai-responses', 'openai-chat'])
 export function validateBaseUrl(input: string): string {
-  try {
-    const url = new URL(input)
-    if (
-      input.length > 300 ||
-      url.protocol !== 'https:' ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash ||
-      (url.port && url.port !== '443') ||
-      isIP(url.hostname) ||
-      url.hostname.includes(':') ||
-      !url.hostname.includes('.') ||
-      /(^|\.)(localhost|local|internal|test|invalid|example|lan|home|metadata|onion)$/.test(
-        url.hostname,
-      ) ||
-      !/^[a-z0-9.-]+$/.test(url.hostname) ||
-      !/^\/[A-Za-z0-9/_-]*$/.test(url.pathname)
-    )
-      throw new Error()
-    return url.href.replace(/\/$/, '')
-  } catch {
-    throw new Error('请输入公开服务的 HTTPS Base URL，不含认证信息、查询参数或内网地址。')
-  }
+  return canonicalModelBaseUrl(input)
 }
-export function isPublicAddress(address: string): boolean {
-  if (isIP(address) === 4) {
-    const [a, b] = address.split('.').map(Number)
-    return !(
-      a === 0 ||
-      a === 10 ||
-      a === 127 ||
-      a >= 224 ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && [0, 168].includes(b)) ||
-      (a === 198 && [18, 19, 51].includes(b)) ||
-      (a === 203 && b === 0)
-    )
-  }
-  // Only globally routable unicast; reject mapped IPv4, local, documentation and multicast ranges.
-  return isIP(address) === 6 && /^[23]/i.test(address) && !/^2001:(db8|0|10|20):/i.test(address)
-}
-/** DNS validation occurs in the actual connection lookup, avoiding check/use rebinding. */
+/** Ordinary HTTP(S) requests use the platform's DNS and normal TLS verification. */
 export const secureFetch: typeof fetch = async (input, init) =>
   new Promise((resolve, reject) => {
+    const url = new URL(String(input))
+    const request = url.protocol === 'http:' ? httpRequest : httpsRequest
     const req = request(
-      String(input),
+      url,
       {
         method: init?.method ?? 'POST',
-        headers: init?.headers as Record<string, string>,
+        headers: Object.fromEntries(new Headers(init?.headers)),
         signal: init?.signal ?? undefined,
-        lookup: (hostname, options, callback) =>
-          lookup(hostname, { all: true }, (error, addresses) => {
-            if (error || !addresses.length || addresses.some((a) => !isPublicAddress(a.address))) {
-              const code = error
-                ? (safeConnectionCode(error.code) ?? 'DNS_LOOKUP_FAILED')
-                : !addresses.length
-                  ? 'DNS_NO_ADDRESS'
-                  : 'ENDPOINT_NOT_PUBLIC'
-              callback(Object.assign(new Error('Endpoint unavailable'), { code }), [], undefined)
-              return
-            }
-            if (options.all) callback(null, addresses)
-            else callback(null, addresses[0].address, addresses[0].family)
-          }),
       },
       (response) => {
         try {
@@ -363,11 +309,7 @@ export class ModelTransport {
     this.config = {
       protocol: protocolSchema.parse(config.protocol),
       baseUrl: validateBaseUrl(config.baseUrl),
-      model: z
-        .string()
-        .trim()
-        .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/)
-        .parse(config.model),
+      model: modelIdSchema.parse(config.model),
     }
     this.timeoutMs = Number.isFinite(timeoutMs) ? Math.min(60000, Math.max(1, timeoutMs)) : 60000
   }
