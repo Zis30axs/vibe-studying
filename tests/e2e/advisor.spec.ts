@@ -302,6 +302,17 @@ test('closing or switching questions cancels an outstanding hint and never shows
     .toBe(2)
   await expect(page.locator('.advisor-hint')).toHaveCount(0)
   await expect(page.locator('.advisor-selection-action')).toHaveCount(0)
+  // Cancellation hides the UI before its durable learning-history write settles.
+  // Verify the actual canceled records before teardown asks Electron to drain writes.
+  await expect
+    .poll(async () =>
+      page.evaluate(async () => {
+        const graph = await window.examcraft!.getLearningGraph()
+        return graph.events.filter((event) => event.type === 'help-canceled').length
+      }),
+    )
+    .toBe(2)
+
 })
 
 test('reference scope change cancels an in-flight hint and requires fresh consent without writing an answer', async () => {

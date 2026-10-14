@@ -605,6 +605,17 @@ test('changing optional PDF scope aborts a pending Advisor reply and suppresses 
   await expect(page.locator('#answer-text')).toHaveValue('SECRET_BEFORE 自己的分析 SECRET_AFTER')
   expect(await advisorPayloads()).toHaveLength(1)
   await assertNoPrivateReference(page)
+  // Cancellation hides the UI before its durable learning-history write settles.
+  // Verify the actual canceled records before teardown asks Electron to drain writes.
+  await expect
+    .poll(async () =>
+      page.evaluate(async () => {
+        const graph = await window.examcraft!.getLearningGraph()
+        return graph.events.filter((event) => event.type === 'help-canceled').length
+      }),
+    )
+    .toBe(1)
+
 })
 
 test('a late chapter save cannot replace a newer physical search scope', async () => {
