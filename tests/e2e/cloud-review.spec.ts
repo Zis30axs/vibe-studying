@@ -152,7 +152,7 @@ test('mock cloud workflow requires each consent, preserves draft on failure and 
 })
 
 test('invalid optional cloud model never blocks the offline desktop', async () => {
-  const page = await launch(false, 'invalid model / value')
+  const page = await launch(false, 'invalid\u007fmodel')
   const capabilities = await page.evaluate(() => window.examcraft!.getCapabilities())
   expect(capabilities.deepseek?.error).toContain('DeepSeek 模型配置无效')
   expect(await page.evaluate(() => window.examcraft!.getModelConfig())).toMatchObject({

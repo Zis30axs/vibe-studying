@@ -152,6 +152,25 @@ function addUnsupported(protocol: ModelProtocol, envelope: any) {
 }
 
 describe.each(protocols)('%s native tools (synthetic fetch only)', (protocol) => {
+  it('preserves provider-defined Unicode model IDs and encodes Gemini path segments', async () => {
+    const model = '供应商/模型 Pro 中文'
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(finalEnvelope(protocol)))
+    await expect(
+      new ModelToolTransport({ ...config(protocol), model }, key, fetcher).start(
+        'System',
+        {},
+        definitions,
+      ),
+    ).resolves.toMatchObject({ kind: 'final' })
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    if (protocol === 'gemini') {
+      expect(String(fetcher.mock.calls[0][0])).toBe(
+        `https://api.vendor.com/v1/models/${encodeURIComponent(model)}:generateContent`,
+      )
+    } else {
+      expect(bodyOf(fetcher, 0).model).toBe(model)
+    }
+  })
   it('accepts twenty bounded definitions including geometry tools and rejects a twenty-first before sending', async () => {
     const tools = Array.from({ length: 20 }, (_, index) => ({
       ...definitions[0],

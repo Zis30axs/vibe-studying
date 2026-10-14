@@ -1,6 +1,6 @@
 {
   "name": "examcraft",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "An offline-first subject IDE for deliberate exam practice",
   "private": true,
   "license": "GPL-3.0-only",
