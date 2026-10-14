@@ -75,7 +75,18 @@ try {
       BrowserWindow.getAllWindows()[0].setContentSize(1440, 960),
     )
     await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1440)
-    await expect(page.getByRole('heading', { name: '今天，理解得更深一点。' })).toBeVisible()
+    // A freshly extracted Windows build can still be initializing its local profile
+    // after the renderer opens. Wait for real readiness without skipping any assertions.
+    try {
+      await expect(page.getByRole('heading', { name: '今天，理解得更深一点。' })).toBeVisible({
+        timeout: 30000,
+      })
+    } catch (error) {
+      await mkdir('test-results', { recursive: true })
+      await page.screenshot({ path: 'test-results/packaged-startup.png', fullPage: true })
+      console.error('Packaged startup page errors:', errors)
+      throw error
+    }
     await expect(page.locator('.page-footer')).toContainText(pkg.version)
     assert.equal(page.url(), 'examcraft://app/index.html')
     await expect(page.getByTestId('activity-heatmap')).toHaveCount(0)
