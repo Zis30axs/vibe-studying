@@ -264,6 +264,16 @@ test('cancel and changed selection abort pending requests; failures preserve ans
   await expect(panel.getByRole('alert')).toContainText('请求未完成')
   await expect(page.locator('#answer-text')).toHaveValue('first phrase and second phrase')
   await expect(consent).not.toBeChecked()
+  // Observe completed local cancellation persistence before closing the app.
+  await expect
+    .poll(async () =>
+      page.evaluate(async () => {
+        const graph = await window.examcraft!.getLearningGraph()
+        return graph.events.filter((event) => event.type === 'help-canceled').length
+      }),
+    )
+    .toBe(2)
+
 })
 
 test('closing or switching questions cancels an outstanding hint and never shows it on the next question', async () => {
@@ -346,6 +356,16 @@ test('reference scope change cancels an in-flight hint and requires fresh consen
   await selectAnswer(page, original, 0, 4)
   await page.locator('.advisor-toolbar button').click()
   await expect(reference).not.toBeChecked()
+  // Observe completed local cancellation persistence before closing the app.
+  await expect
+    .poll(async () =>
+      page.evaluate(async () => {
+        const graph = await window.examcraft!.getLearningGraph()
+        return graph.events.filter((event) => event.type === 'help-canceled').length
+      }),
+    )
+    .toBe(1)
+
 })
 
 test('student question API contains no teacher reference fields before submission', async () => {
@@ -406,6 +426,16 @@ test('programmatic module checkpoint restore invalidates a pending selection hin
     )
     .toBe(1)
   await expect(page.locator('#answer-text')).toHaveValue(finalText)
+  // Observe completed local cancellation persistence before closing the app.
+  await expect
+    .poll(async () =>
+      page.evaluate(async () => {
+        const graph = await window.examcraft!.getLearningGraph()
+        return graph.events.filter((event) => event.type === 'help-canceled').length
+      }),
+    )
+    .toBe(1)
+
 })
 
 test('collapsing a textarea selection removes the action and cannot reopen an old snapshot', async () => {
@@ -539,6 +569,16 @@ test('outside dismissal cancels an outstanding request and the closed dialog sta
   await page.locator('.advisor-toolbar button').click()
   await expect(panel).toHaveCount(0)
   expect(await bodyData()).toHaveLength(1)
+  // Observe completed local cancellation persistence before closing the app.
+  await expect
+    .poll(async () =>
+      page.evaluate(async () => {
+        const graph = await window.examcraft!.getLearningGraph()
+        return graph.events.filter((event) => event.type === 'help-canceled').length
+      }),
+    )
+    .toBe(1)
+
 })
 
 test('Advisor matches the light workspace and honors reduced motion without transforms', async () => {
