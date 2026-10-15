@@ -158,6 +158,8 @@ describe('Agent renderer capability and consent scope', () => {
       'generate_geometry_question',
     )
     expect(availableAgentTools(scope())).toEqual([
+      'list_skills',
+      'run_skill',
       'list_questions',
       'get_question',
       'search_formulas',
@@ -167,6 +169,8 @@ describe('Agent renderer capability and consent scope', () => {
       'geometry_calculate',
     ])
     expect(availableAgentTools(scope({ subject: 'geography' }))).toEqual([
+      'list_skills',
+      'run_skill',
       'list_questions',
       'get_question',
       'search_formulas',

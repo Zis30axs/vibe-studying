@@ -441,6 +441,7 @@ export class AgentService {
           if (exhaustedBudget) throw new AgentRunError(exhaustedBudget)
           active()
           if (role === 'parent') state.formulaReferences = registry.getFormulaReferences()
+          if (role === 'parent') state.skillReceipts = registry.getSkillReceipts()
           done(step, !result.isError)
           if (current.learning && this.options.graph)
             await this.writing(
@@ -528,6 +529,12 @@ export class AgentService {
       }
       const registry = createAgentToolRegistry(context, {
         ...webAdapters,
+        beforeSkillTool: async () => {
+          await checkRevision()
+          if (state.toolCalls >= AGENT_BUDGET.toolCalls)
+            budgetFailure('本次 Agent 工具预算已用尽（含技能内部步骤）；没有自动重试。')
+          state.toolCalls++
+        },
         getQuestion: async (id) => {
           active()
           const q = questions.find((q) => q.id === id)
@@ -651,8 +658,13 @@ export class AgentService {
         registry.definitions.some((definition) => definition.name === 'generate_geometry_question')
           ? `${SYSTEM}\n\n${geometryCreationInstructions()}`
           : SYSTEM
+      const skillInstructions = registry.definitions.some(
+        (definition) => definition.name === 'run_skill',
+      )
+        ? '\n用户要求分步引导、错因自查、变式练习、主动复习或教材证据时，优先调用 list_skills 查看本次可用技能，再按目录的确切技能ID和参数调用 run_skill。技能内部工具仍计入六次总预算；不要为了发现技能消耗多轮试探。技能未列出时说明尚需哪些授权，不自行扩大范围。分步引导每次只展示用户请求的一步；规则错因是待核对假设；练习草案不等于已保存。只有实际成功的技能结果才可声称已执行。'
+        : ''
       let turn = await transport.start(
-        system,
+        system + skillInstructions,
         JSON.parse(JSON.stringify(data)),
         registry.definitions,
         controller.signal,

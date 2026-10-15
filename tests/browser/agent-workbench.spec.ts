@@ -137,6 +137,8 @@ test('normal run sends only chosen scope and displays real result metadata as es
   expect(sent?.answer).toBeUndefined()
   expect(sent?.localDraft?.text).toBe('Original answer')
   expect(sent?.allowedTools).toEqual([
+    'list_skills',
+    'run_skill',
     'list_questions',
     'get_question',
     'search_formulas',

@@ -2,6 +2,13 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { ExamCraftApi } from '../src/shared/types'
 
 const api: ExamCraftApi = Object.freeze<ExamCraftApi>({
+  getEmbeddingConfig: () => ipcRenderer.invoke('examcraft:get-embedding-config'),
+  saveEmbeddingConfig: (input) => ipcRenderer.invoke('examcraft:save-embedding-config', input),
+  diagnoseEmbedding: (input) => ipcRenderer.invoke('examcraft:diagnose-embedding', input),
+  prepareEmbedding: (input) => ipcRenderer.invoke('examcraft:prepare-embedding', input),
+  confirmEmbedding: (input) => ipcRenderer.invoke('examcraft:confirm-embedding', input),
+  searchEmbeddingLocal: (input) => ipcRenderer.invoke('examcraft:search-embedding-local', input),
+  clearEmbeddingIndex: (input) => ipcRenderer.invoke('examcraft:clear-embedding-index', input),
   refreshReviewKnowledge: (input) =>
     ipcRenderer.invoke('examcraft:refresh-review-knowledge', input),
   listReviewKnowledge: (input) => ipcRenderer.invoke('examcraft:list-review-knowledge', input),

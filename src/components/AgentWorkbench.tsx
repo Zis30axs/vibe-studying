@@ -1,4 +1,5 @@
 import { GEOMETRY_TEMPLATE_CATALOG } from '../shared/geometry-templates'
+import { AGENT_SKILL_CATALOG } from '../shared/agent-skills'
 import { GeometryFigure } from './GeometryFigure'
 import type { FormulaReferenceReceipt } from '../shared/formula-tools'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
@@ -497,6 +498,45 @@ export function AgentWorkbench({
       <div className="agent-layout">
         <section className="agent-scope" aria-label="任务与发送范围">
           <h3>1. 确认本次任务与范围</h3>
+          <details className="agent-skill-catalog" open>
+            <summary>学习技能</summary>
+            <p className="agent-muted">
+              选择技能会填写任务并启用所需工具。开始任务仍需确认发送范围；作答、参考答案和教材授权需另行选择。
+            </p>
+            <div className="agent-skill-grid">
+              {AGENT_SKILL_CATALOG.filter((skill) => skill.subjects.includes(subject)).map(
+                (skill) => (
+                  <article key={skill.id}>
+                    <button
+                      type="button"
+                      disabled={receiving}
+                      onClick={() =>
+                        change(() => {
+                          setTask(skill.task)
+                          if (!skill.modes.includes(mode)) setMode(skill.modes[0])
+                          setSelectedTools((previous) => [
+                            ...new Set<AgentToolName>([
+                              ...previous,
+                              'list_skills',
+                              'run_skill',
+                              ...skill.requiredTools,
+                            ]),
+                          ])
+                        })
+                      }
+                    >
+                      {skill.title}
+                    </button>
+                    <p className="agent-muted">{skill.description}</p>
+                    <small>
+                      v{skill.version} · 本地步骤 ·{' '}
+                      {skill.writes === 'proposal-only' ? '保存前确认' : '只读'}
+                    </small>
+                  </article>
+                ),
+              )}
+            </div>
+          </details>
           <label className="agent-field">
             本次任务
             <textarea
@@ -1005,6 +1045,21 @@ export function AgentWorkbench({
                   </li>
                 ))}
               </ol>
+              {!!snapshot.run.skillReceipts?.length && (
+                <section aria-label="本次实际执行的技能">
+                  <h4>本次实际执行的技能</h4>
+                  <ul>
+                    {snapshot.run.skillReceipts.map((receipt) => (
+                      <li key={receipt.skillId}>
+                        {AGENT_SKILL_CATALOG.find((skill) => skill.id === receipt.skillId)?.title ??
+                          receipt.skillId}{' '}
+                        · v{receipt.version}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="agent-muted">执行记录由本地工具生成，学习结论仍需核对。</p>
+                </section>
+              )}
               {snapshot.run.text && (
                 <div className="agent-output">
                   <h4>模型结果</h4>

@@ -9,6 +9,11 @@ import {
 } from '../shared/web-research'
 
 export const AGENT_TOOL_LABELS: Record<AgentToolName, { label: string; description: string }> = {
+  list_skills: { label: '查看学习技能', description: '返回本次权限允许的内置技能、版本和参数。' },
+  run_skill: {
+    label: '执行学习技能',
+    description: '复用已启用工具的确定性步骤；不增加授权、预算或自动保存。',
+  },
   web_search: {
     label: '检索公开资料（Tavily）',
     description: '只发送下方预览的固定查询；每次 basic 搜索约 1 credit，主/子角色共享 2 次上限。',
@@ -87,6 +92,8 @@ export const AGENT_DELEGATE_TOOLS: readonly AgentToolName[] = [
 /** These tools transmit to the child receiver; other delegated calls use the parent. */
 export const AGENT_CHILD_TOOLS: readonly AgentToolName[] = ['advise_selection', 'review_modules']
 export const AGENT_DEFAULT_TOOLS: AgentToolName[] = [
+  'list_skills',
+  'run_skill',
   'list_questions',
   'get_question',
   'search_formulas',
@@ -114,6 +121,7 @@ export interface AgentToolUiScope {
 }
 export function availableAgentTools(scope: AgentToolUiScope): AgentToolName[] {
   return AGENT_TOOL_NAMES.filter((name) => {
+    if (name === 'list_skills' || name === 'run_skill') return true
     if (name === 'web_search' || name === 'web_fetch') return scope.hasWeb === true
     if (AGENT_DELEGATE_TOOLS.includes(name) && !scope.allowDelegation) return false
     if (['list_questions', 'get_question'].includes(name)) return scope.hasQuestion

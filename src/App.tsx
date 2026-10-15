@@ -38,6 +38,7 @@ import { ModelRequestStatus } from './components/ModelRequestStatus'
 import { ModelDebugPanel } from './components/ModelDebugPanel'
 import { ModelSettings } from './components/ModelSettings'
 import { WebResearchSettings } from './components/WebResearchSettings'
+import { EmbeddingSettings } from './components/EmbeddingSettings'
 import { SelectionAdvisor } from './components/SelectionAdvisor'
 import { GitHubProfile } from './components/GitHubProfile'
 import { KnowledgeLibrary } from './components/KnowledgeLibrary'
@@ -1632,6 +1633,7 @@ export default function App() {
                     }}
                   />
                   <WebResearchSettings api={api!} />
+                  <EmbeddingSettings api={api!} />
                   <ModelConsentSettings api={api!} />
                   <ModelDebugPanel api={api!} />
                   <section className="card adapter-card wide">

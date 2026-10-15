@@ -62,6 +62,15 @@ import {
 } from '../shared/web-research'
 import { researchSourceAttribution } from '../shared/question-research'
 import { WebResearchError } from './web-research-provider'
+import {
+  AGENT_SKILL_CATALOG,
+  agentSkillInputSchemas,
+  getAgentSkill,
+  runAgentSkillSchema,
+  type AgentSkillDescriptor,
+  type AgentSkillReceipt,
+} from '../shared/agent-skills'
+import { executeAgentSkill } from '../domain/agent-skills'
 
 export const AGENT_TOOL_LIMITS = Object.freeze({
   argumentBytes: 32_768,
@@ -213,6 +222,8 @@ const questionProposalSchema = z.strictObject({
   researchOrigin: z.enum(['adapted', 'unverified-source']).optional(),
 })
 const schemas = {
+  list_skills: z.strictObject({}),
+  run_skill: runAgentSkillSchema,
   search_formulas: formulaSearchInputSchema,
   get_formula: formulaGetInputSchema,
   list_questions: z.strictObject({
@@ -271,6 +282,10 @@ const schemas = {
   propose_question: questionProposalSchema,
 } satisfies Record<AgentToolName, z.ZodType>
 const descriptions: Record<AgentToolName, string> = {
+  list_skills:
+    '列出本次已授权且可执行的本地学习技能，含版本、严格参数schema及依赖工具。技能只能复用本次允许的工具，不读取学习历史、不自动联网；出题仍须确认。',
+  run_skill:
+    '执行list_skills返回的本地学习技能。传skillId及严格匹配该技能schema的input；只能缩小本次学科、模式、作答和教材范围，内部调用计入共享工具预算，教材摘录共享三段限额。变式仅暂存待确认草案。',
   search_formulas:
     '搜索当前学科的内置公式速查，每次最多三条完整条目，含确切ID、符号单位、适用条件、易错点、例题和参考来源。只读离线原创教学整理，不读取教材或答案，不访问来源网址。引用时保留formulaId、catalogVersion并核对适用条件；没有命中就说明未收录。',
   get_formula:
@@ -345,6 +360,7 @@ export function createAgentToolRegistry(input: AgentToolContext, adapters: Agent
   const questionCache = new Map<string, Question>()
   let retrievedEvidence: KnowledgeEvidence[] = []
   const formulaReferences = new Map<string, FormulaReferenceReceipt>()
+  const skillReceipts = new Map<string, AgentSkillReceipt>()
   // Local feedback and formal remote grading return to the parent profile only.
   // Advisor/module delegation sends reference-derived data to both recipients.
   const referencesAllowed = () =>
@@ -354,6 +370,7 @@ export function createAgentToolRegistry(input: AgentToolContext, adapters: Agent
   const webAllowed = () => !!context.web?.consent && !!adapters.getWebSources
   const permitted = (name: AgentToolName): boolean => {
     if (!allowed.has(name)) return false
+    if (name === 'run_skill') return AGENT_SKILL_CATALOG.some(skillPermitted)
     if (name === 'search_formulas' || name === 'get_formula')
       return context.subject === 'math' || context.subject === 'geography'
     if (name === 'search_knowledge') return knowledgeAllowed() && !!adapters.searchKnowledge
@@ -389,6 +406,13 @@ export function createAgentToolRegistry(input: AgentToolContext, adapters: Agent
     if (name === 'propose_answer_edit')
       return !!context.currentQuestionId && !!context.answer && !!adapters.onProposal
     return true
+  }
+  function skillPermitted(skill: AgentSkillDescriptor): boolean {
+    return (
+      skill.subjects.includes(context.subject) &&
+      skill.modes.includes(context.mode) &&
+      skill.requiredTools.every(permitted)
+    )
   }
   /** Both retrieval paths share one immutable disclosure ledger. A repeated ID is
    * free only while all canonical source metadata and text remain identical. */
@@ -543,6 +567,31 @@ export function createAgentToolRegistry(input: AgentToolContext, adapters: Agent
   }))
   async function run(name: AgentToolName, args: unknown): Promise<unknown> {
     switch (name) {
+      case 'list_skills':
+        return { skills: structuredClone(AGENT_SKILL_CATALOG.filter(skillPermitted)) }
+      case 'run_skill': {
+        const { skillId, input } = schemas.run_skill.parse(args)
+        const skill = getAgentSkill(skillId)
+        if (!skillPermitted(skill)) return fail('forbidden')
+        try {
+          agentSkillInputSchemas[skillId].parse(input)
+        } catch {
+          return fail('invalid_arguments')
+        }
+        let calls = 0
+        return executeAgentSkill(skillId, input, async (tool, arguments_) => {
+          // The trusted descriptor is also a per-skill capability: a future
+          // handler cannot invoke another skill or undeclared optional tools.
+          if (!skill.requiredTools.includes(tool) || ++calls > 3) return fail('forbidden')
+          await adapters.beforeSkillTool?.(tool)
+          const result = await execute({ name: tool, arguments: arguments_ })
+          if (result.isError) {
+            const code = (result.output as { error: { code: ErrorCode } }).error.code
+            return fail(code in errorMessages ? code : 'tool_failed')
+          }
+          return result.output
+        })
+      }
       case 'search_formulas': {
         const { query, chapter, limit = 3 } = schemas.search_formulas.parse(args)
         const formulas = searchFormulas(query, {
@@ -1033,6 +1082,11 @@ export function createAgentToolRegistry(input: AgentToolContext, adapters: Agent
             provenance: FORMULA_PROVENANCE,
           })
       }
+      if (name === 'run_skill') {
+        const { skillId } = schemas.run_skill.parse(call.arguments)
+        const skill = getAgentSkill(skillId)
+        skillReceipts.set(skill.id, { skillId: skill.id, version: skill.version })
+      }
       // Consumers cannot mutate the bundled catalog or the receipt ledger via a result.
       return {
         output:
@@ -1083,6 +1137,7 @@ export function createAgentToolRegistry(input: AgentToolContext, adapters: Agent
     definitions: freeze(definitions),
     execute,
     getFormulaReferences: () => structuredClone([...formulaReferences.values()]),
+    getSkillReceipts: () => structuredClone([...skillReceipts.values()]),
   }
 }
 

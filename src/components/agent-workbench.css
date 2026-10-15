@@ -327,3 +327,25 @@
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
+.agent-skill-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.agent-skill-grid article {
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  padding: 12px;
+}
+.agent-skill-grid p {
+  margin: 8px 0;
+  line-height: 1.6;
+}
+.agent-skill-grid button {
+  width: 100%;
+  text-align: left;
+}
+.agent-skill-grid small {
+  color: var(--app-muted);
+}

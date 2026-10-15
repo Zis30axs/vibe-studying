@@ -41,6 +41,7 @@ export interface AgentProposalPreview {
   proposal: AgentToolProposal
 }
 export interface AgentRunState {
+  skillReceipts?: { skillId: import('./agent-skills').AgentSkillId; version: string }[]
   runId: string
   status: 'running' | 'complete' | 'failed' | 'cancelled'
   startedAt: number

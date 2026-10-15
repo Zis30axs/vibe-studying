@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs'
 // real Electron coverage remains in playwright.config.ts.
 export default defineConfig({
   testDir: 'tests/browser',
+  outputDir: 'test-results/browser',
   workers: 1,
   timeout: 30000,
   reporter: 'list',

@@ -1,4 +1,5 @@
 import { resolveAgentKnowledgeIndex } from '../src/adapters/agent-knowledge'
+import { EmbeddingService, EmbeddingError } from '../src/adapters/embedding-service'
 import { ReviewKnowledgeIndex, ReviewKnowledgeError } from '../src/adapters/review-knowledge-index'
 import { bindWindowWorkCancellation } from './window-work-lifecycle'
 import { createSystemProxyResolver } from './model-system-proxy'
@@ -73,6 +74,20 @@ try {
     'DeepSeek 模型配置无效，请检查 EXAMCRAFT_DEEPSEEK_MODEL 后重启；本地模式仍可使用。'
 }
 app.setName('ExamCraft')
+// Desktop regression runs must never take over the user's foreground. This mode
+// is restricted to development plus an explicitly isolated test profile.
+const silentDesktopTest =
+  !app.isPackaged && process.env.EXAMCRAFT_E2E_SILENT === '1' && !!process.env.EXAMCRAFT_USER_DATA
+if (silentDesktopTest) {
+  dialog.showErrorBox = () => {
+    process.stderr.write('ExamCraft silent test: native error dialog suppressed.\n')
+  }
+  // Fixtures that need a file selection replace this with a deterministic result.
+  dialog.showOpenDialog = (async () => ({
+    canceled: true,
+    filePaths: [],
+  })) as typeof dialog.showOpenDialog
+}
 // An explicit CLI profile works in portable builds too, including isolated release smoke tests.
 // Ambient EXAMCRAFT_USER_DATA is still honored only in development.
 const userDataOverride =
@@ -199,7 +214,45 @@ function registerIpc(
     }),
   )
   const knowledgeImports = new Map<string, AbortController>()
+  const embeddings = new EmbeddingService(app.getPath('userData'), {
+    secureStorage: osSecretStorage(safeStorage),
+    library: knowledge,
+  })
+  app.on('before-quit', () => embeddings.cancelAll())
+  const safeEmbedding = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work()
+    } catch (error) {
+      throw new Error(
+        error instanceof EmbeddingError
+          ? error.message
+          : 'Embedding 操作未完成；请重新确认配置与发送范围。',
+      )
+    }
+  }
+  handle('examcraft:get-embedding-config', () => safeEmbedding(() => embeddings.getConfig()))
+  handle(
+    'examcraft:save-embedding-config',
+    (input) => safeEmbedding(() => embeddings.saveConfig(input)),
+    true,
+  )
+  handle('examcraft:diagnose-embedding', (input) => safeEmbedding(() => embeddings.diagnose(input)))
+  handle('examcraft:prepare-embedding', (input) => safeEmbedding(() => embeddings.prepare(input)))
+  handle(
+    'examcraft:confirm-embedding',
+    (input) => safeEmbedding(() => embeddings.confirm(input)),
+    true,
+  )
+  handle('examcraft:search-embedding-local', (input) =>
+    safeEmbedding(() => embeddings.searchLocal(input)),
+  )
+  handle(
+    'examcraft:clear-embedding-index',
+    (input) => safeEmbedding(() => embeddings.clearIndex(input)),
+    true,
+  )
   cancelWindowWork = () => {
+    embeddings.cancelAll()
     models.cancelAll()
     service.cancelCloudReview()
     for (const controller of knowledgeImports.values()) controller.abort()
@@ -283,7 +336,9 @@ function registerIpc(
     resolveKnowledge: (ids) => knowledge.resolveChunks(ids),
     resolveKnowledgeIndex: (input) => resolveAgentKnowledgeIndex(reviewKnowledge, input),
     searchKnowledge: async (input) =>
-      (await knowledge.search(input)).map(({ score: _score, ...evidence }) => evidence),
+      ((await embeddings.searchLocal(input)).hits ?? []).map(
+        ({ score: _score, ...evidence }) => evidence,
+      ),
     validateKnowledgeScope: async (scope, subject) => {
       const document = (await knowledge.list()).find((item) => item.id === scope.documentId)
       if (!document || document.subject !== subject || scope.endPage > document.pageCount)
@@ -731,6 +786,8 @@ async function registerAppProtocol(): Promise<void> {
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
+    show: !silentDesktopTest,
+    skipTaskbar: silentDesktopTest,
     width: 1440,
     height: 960,
     minWidth: 1000,
@@ -769,6 +826,10 @@ function createWindow(): void {
       if (window.isDestroyed()) return
       if (failed) {
         draining = false
+        if (silentDesktopTest) {
+          window.destroy()
+          return
+        }
         window.show()
         window.focus()
         dialog.showErrorBox(
@@ -787,6 +848,7 @@ function createWindow(): void {
 if (!app.requestSingleInstanceLock()) app.quit()
 else {
   app.on('second-instance', () => {
+    if (silentDesktopTest) return
     if (mainWindow?.isMinimized()) mainWindow.restore()
     mainWindow?.focus()
   })

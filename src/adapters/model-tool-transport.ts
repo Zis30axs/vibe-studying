@@ -28,7 +28,7 @@ import {
 
 export const TOOL_TRANSPORT_LIMITS = Object.freeze({
   callsPerTurn: 6,
-  definitions: 20, // Eighteen existing tools plus bounded geometry calculation and generation.
+  definitions: 22, // Existing tools plus bounded skill discovery and execution.
   argumentBytes: 32768,
   resultBytes: 65536,
   continuationBytes: 262144,

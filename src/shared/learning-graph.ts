@@ -40,6 +40,8 @@ export const helpKindLabels: Record<HelpKind, string> = {
   agent: 'Agent 求助',
 }
 export const traceTools = [
+  'list_skills',
+  'run_skill',
   'web_search',
   'web_fetch',
   'math_plot',

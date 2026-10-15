@@ -1,4 +1,5 @@
 import type { GeoboardState } from './geoboard-types'
+import type { EmbeddingApi } from './embeddings'
 import type { GeometryScene } from './geometry'
 import type { ReviewKnowledgeApi } from './review-knowledge'
 import type { WebResearchApi } from './web-research'
@@ -397,6 +398,7 @@ export interface GeneratedQuestionPreview {
 }
 export interface ExamCraftApi
   extends
+    EmbeddingApi,
     ReviewKnowledgeApi,
     WebResearchApi,
     KnowledgeApi,

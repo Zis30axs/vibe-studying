@@ -11,6 +11,8 @@ import type {
 } from './types'
 
 export const AGENT_TOOL_NAMES = [
+  'list_skills',
+  'run_skill',
   'list_questions',
   'get_question',
   'search_formulas',
@@ -63,6 +65,9 @@ export type AgentToolProposal =
     }
   | { kind: 'question'; question: Question }
 export interface AgentToolAdapters {
+  /** Owning service charges each skill subcall against the same run budget and
+   * checks cancellation/config revision before the registry touches local data. */
+  beforeSkillTool?(name: Exclude<AgentToolName, 'list_skills' | 'run_skill'>): Promise<void>
   getQuestion(questionId: string): Promise<Question>
   searchKnowledge?(input: KnowledgeSearchInput): Promise<KnowledgeEvidence[]>
   /** Main-process canonical library lookup only; never accept model-authored evidence. */

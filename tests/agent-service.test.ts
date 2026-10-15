@@ -95,6 +95,69 @@ async function finished(agent: AgentService, runId: string): Promise<AgentRunSta
   await vi.waitFor(() => expect(agent.get(runId)?.status).not.toBe('running'))
   return agent.get(runId)!
 }
+
+describe('learning skills through the bounded Agent service', () => {
+  const skillArgs = {
+    skillId: 'analytic-geometry-guide',
+    input: { a: { x: 0, y: 0 }, b: { x: 0, y: 4 }, point: { x: 3, y: 2 }, step: 4 },
+  }
+  it('executes a local skill through native tools and charges its internal computation', async () => {
+    const payloads: any[] = []
+    const f = await fixture(
+      vi.fn(async (_url, init) => {
+        payloads.push(JSON.parse(String(init?.body)))
+        return payloads.length === 1 ? call('skill-1', 'run_skill', skillArgs) : final()
+      }) as typeof fetch,
+    )
+    await f.agent.start({
+      ...f.request,
+      allowedTools: ['list_skills', 'run_skill', 'geometry_calculate'],
+    })
+    const state = await finished(f.agent, f.request.runId)
+    expect(state.status).toBe('complete')
+    expect(state.toolCalls).toBe(2)
+    expect(state.skillReceipts).toEqual([{ skillId: skillArgs.skillId, version: '1.0.0' }])
+    expect(state.delegatedCalls).toBe(0)
+    const output = JSON.parse(
+      payloads[1].messages.find((message: any) => message.role === 'tool').content,
+    )
+    expect(output.skillId).toBe(skillArgs.skillId)
+    expect(output.result.current.data.distance).toBe(3)
+    expect(JSON.stringify(payloads)).not.toContain('PRIVATE_REFERENCE_FIXTURE')
+    expect(f.saves).not.toHaveBeenCalled()
+  })
+  it('cannot multiply the shared six-call budget through nested skill execution', async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: 'tool_calls',
+                message: {
+                  role: 'assistant',
+                  content: null,
+                  tool_calls: Array.from({ length: 4 }, (_, i) => ({
+                    id: `skill-${i}`,
+                    type: 'function',
+                    function: { name: 'run_skill', arguments: JSON.stringify(skillArgs) },
+                  })),
+                },
+              },
+            ],
+          }),
+        ),
+    ) as typeof fetch
+    const f = await fixture(fetchImpl)
+    await f.agent.start({ ...f.request, allowedTools: ['run_skill', 'geometry_calculate'] })
+    const state = await finished(f.agent, f.request.runId)
+    expect(state.status).toBe('failed')
+    expect(state.toolCalls).toBe(6)
+    expect(state.message).toContain('预算')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(f.saves).not.toHaveBeenCalled()
+  })
+})
 describe('bounded native Agent service', () => {
   it('executes actual local tool and returns numeric result to the same model before final reply', async () => {
     const payloads: any[] = []
