@@ -63,6 +63,17 @@ jobs:
           if (next === old) throw new Error('Expected motion description was not found')
           fs.writeFileSync(path,next)
           NODE
+      - name: Keep closed search dialogs free of hidden question result nodes
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          const path = 'src/components/WorkspaceQuickSwitch.tsx'
+          const old = fs.readFileSync(path,'utf8')
+          const next = old.replace('{commands.map((command, position)', '{open && commands.map((command, position)')
+          if (next === old) throw new Error('Expected command result render was not found')
+          fs.writeFileSync(path,next)
+          NODE
       - run: npm ci
       - name: Format delivered code and docs only
         shell: bash
