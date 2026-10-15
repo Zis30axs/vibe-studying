@@ -796,6 +796,8 @@ function createWindow(): void {
     backgroundColor: '#f5f4ef',
     autoHideMenuBar: true,
     webPreferences: {
+      // Hidden test windows still need normal renderer timers and animation frames.
+      backgroundThrottling: !silentDesktopTest,
       preload: join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
