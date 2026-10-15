@@ -1,3 +1,4 @@
+import type { GeoboardState } from './geoboard-types'
 import type { GeometryScene } from './geometry'
 import type { ReviewKnowledgeApi } from './review-knowledge'
 import type { WebResearchApi } from './web-research'
@@ -174,6 +175,8 @@ export interface MathParameters {
   c: number
 }
 export interface MathWorkbenchState {
+  /** Optional, independently undoable 2-D constructions; absent on legacy drafts. */
+  geoboard?: GeoboardState
   geometry?: GeometryScene
   rightAngles?: { id: string; vertex: string; from: string; to: string }[]
   drawing: GeoDrawing

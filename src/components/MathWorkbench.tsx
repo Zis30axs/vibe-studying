@@ -1,3 +1,4 @@
+import { GeoboardWorkbench } from './GeoboardWorkbench'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
 import type { MathWorkbenchState, GeoPoint } from '../shared/types'
@@ -233,6 +234,7 @@ export function MathWorkbench({
   }
   function commit(next: MathWorkbenchState) {
     if (disabled) return
+    next = { ...next, geoboard: value.geoboard }
     if (next.rightAngles) next = { ...next, rightAngles: validRightAngles(next) }
     setHistory((h) => [...h.slice(-39), value])
     onChange(next)
@@ -494,6 +496,15 @@ export function MathWorkbench({
           {drawing.points.length} 个点 · {drawing.lines.length} 条线
         </span>
       </div>
+      <details className="geoboard-disclosure">
+        <summary>动态钉板 · 圆与切线 · 几何约束</summary>
+        <GeoboardWorkbench
+          value={value.geoboard}
+          legacy={value.drawing}
+          disabled={disabled}
+          onChange={(geoboard) => onChange({ ...value, geoboard })}
+        />
+      </details>
       <div className="math-toolbar" role="group" aria-label="数学工具">
         {(
           [
@@ -524,7 +535,7 @@ export function MathWorkbench({
             cancelDrag()
             const previous = history.at(-1)!
             setHistory(history.slice(0, -1))
-            onChange(previous)
+            onChange({ ...previous, geoboard: value.geoboard })
             setExpression(previous.expression)
             clearSelection()
             setConfirm(false)

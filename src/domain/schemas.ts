@@ -1,3 +1,4 @@
+import { geoboardSchema } from '../shared/geoboard'
 import { geometrySceneSchema } from '../shared/geometry'
 import { submissionAssistanceSchema } from '../shared/learning-graph'
 import { terrainExerciseSchema } from './terrain-exercise'
@@ -155,6 +156,7 @@ export const drawingSchema = z
 
 export const mathWorkbenchSchema = z
   .strictObject({
+    geoboard: geoboardSchema.optional(),
     geometry: geometrySceneSchema.optional(),
     rightAngles: z
       .array(
