@@ -1,0 +1,96 @@
+name: Verify dynamic geometry delivery
+on:
+  push:
+    branches: ['automation/geoboard-20261015-*']
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Apply checksum-verified source patch only
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { createHash } from 'node:crypto';
+          import { brotliDecompressSync } from 'node:zlib';
+          import { execFileSync } from 'node:child_process';
+          const root='.geoboard-delivery';
+          const encoded=Array.from({length:9},(_,i)=>fs.readFileSync(`${root}/chunk-${String(i).padStart(2,'0')}.txt`,'utf8')).join('');
+          if(createHash('sha256').update(encoded).digest('hex')!=='b194ec208fc909374b5aa35454ed0dc150b72ec60d2f3c926f64fd476f74c3e3')throw new Error('Transport checksum mismatch');
+          const manifest=JSON.parse(brotliDecompressSync(Buffer.from(encoded,'base64')).toString('utf8'));
+          if(manifest.baseCommit!=='456371ac6351ee2065849dbdc527492652e54527'||manifest.baseTree!=='1da207bfd4d0c24f7de44c534cfa8ee6daefa6ee')throw new Error('Unexpected baseline');
+          const allowed=new Set(['README.md','package.json','package-lock.json','src/components/MathWorkbench.tsx','src/domain/schemas.ts','src/shared/types.ts','docs/geoboard.md','docs/releases/v0.5.0.md','examples/circle-tangent-bank.json','src/components/GeoboardWorkbench.tsx','src/components/geoboard-view.ts','src/components/geoboard.css','src/domain/geoboard.ts','src/shared/geoboard-types.ts','src/shared/geoboard.ts','tests/browser/geoboard.spec.ts','tests/e2e/geoboard.spec.ts','tests/examcraft-circle-bank.test.ts','tests/geoboard-core.test.ts','tests/geoboard.integration.test.ts']);
+          if(Object.keys(manifest.files).length!==allowed.size)throw new Error('Wrong file count');
+          for(const [file,record] of Object.entries(manifest.files)){
+            if(!allowed.has(file))throw new Error(`Unexpected path ${file}`);
+            if(record.before){
+              const hash=execFileSync('git',['hash-object',file],{encoding:'utf8'}).trim();
+              if(hash!==record.before)throw new Error(`Baseline differs: ${file}`);
+            }else if(fs.existsSync(file))throw new Error(`Addition already exists: ${file}`);
+          }
+          fs.writeFileSync(`${root}/source.patch`,manifest.patch);
+          execFileSync('git',['apply','--check',`${root}/source.patch`],{stdio:'inherit'});
+          execFileSync('git',['apply',`${root}/source.patch`],{stdio:'inherit'});
+          for(const [file,record] of Object.entries(manifest.files)){
+            const hash=execFileSync('git',['hash-object',file],{encoding:'utf8'}).trim();
+            if(hash!==record.after)throw new Error(`Patched content differs: ${file}`);
+          }
+          fs.writeFileSync(`${root}/manifest.json`,JSON.stringify(manifest));
+          console.log(`Applied ${allowed.size} verified source/test/documentation files. No user data accessed.`);
+          NODE
+      - run: npm ci
+      - name: Format only delivered code and documentation
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';import {execFileSync}from'node:child_process';
+          const files=Object.keys(JSON.parse(fs.readFileSync('.geoboard-delivery/manifest.json','utf8')).files).filter(p=>p!=='examples/circle-tangent-bank.json');
+          execFileSync('npm',['exec','--yes=false','--','prettier','--write',...files],{stdio:'inherit'});
+          NODE
+      - run: npm run check
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - name: Create clean verified candidate without moving main
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs=require('node:fs');
+            const {execFileSync}=require('node:child_process');
+            const manifest=JSON.parse(fs.readFileSync('.geoboard-delivery/manifest.json','utf8'));
+            const target={owner:context.repo.owner,repo:context.repo.repo};
+            const {data:main}=await github.rest.git.getRef({...target,ref:'heads/main'});
+            if(main.object.sha!==manifest.baseCommit)throw new Error('main moved; do not publish stale changes');
+            const tree=[];
+            for(const file of Object.keys(manifest.files)){
+              const content=fs.readFileSync(file);
+              const {data:blob}=await github.rest.git.createBlob({...target,encoding:'base64',content:content.toString('base64')});
+              const expected=execFileSync('git',['hash-object',file],{encoding:'utf8'}).trim();
+              if(blob.sha!==expected)throw new Error(`Git blob mismatch: ${file}`);
+              tree.push({path:file,mode:'100644',type:'blob',sha:blob.sha});
+            }
+            const {data:createdTree}=await github.rest.git.createTree({...target,base_tree:manifest.baseTree,tree});
+            const {data:commit}=await github.rest.git.createCommit({...target,message:'feat(math): add dynamic geoboard and 30 circle practice questions (v0.5.0)',tree:createdTree.sha,parents:[manifest.baseCommit]});
+            const result={commit:commit.sha,parent:manifest.baseCommit,tree:createdTree.sha,files:tree,validation:'npm run check and complete browser suite passed',workflowRun:context.runId};
+            fs.writeFileSync('.geoboard-delivery/candidate.json',JSON.stringify(result,null,2));
+            core.notice(`VERIFIED_CANDIDATE=${commit.sha}`);
+            await core.summary.addHeading('Verified candidate, main unchanged').addCodeBlock(JSON.stringify(result,null,2),'json').write();
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-geoboard-candidate
+          path: .geoboard-delivery/candidate.json
+          include-hidden-files: true
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geoboard-verification-failure
+          path: test-results/
+          if-no-files-found: ignore
