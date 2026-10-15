@@ -407,15 +407,24 @@ it('cancellation during pending legacy help never turns its late result into com
   expect(learningAssistance(stored, stored.snapshots[0].id).status).toBe('independent')
   expect(learningHelpState(stored, stored.branches[0].id)).toBe('canceled')
 })
-it('more than a thousand autosaves remain usable with only a baseline and milestone snapshots', async () => {
-  const { graph, service } = await setup()
-  for (let index = 0; index < 1005; index++)
-    await service.saveDraft('pol-assembly-1', { ...emptyDraft(), text: `自己的第 ${index} 次编辑` })
-  expect((await graph.load()).snapshots).toHaveLength(1)
-  expect((await service.loadState()).drafts['pol-assembly-1'].text).toBe('自己的第 1004 次编辑')
-  await service.submitAnswer('pol-assembly-1', { ...emptyDraft(), text: '自己的第 1004 次编辑' })
-  expect((await graph.load()).snapshots).toHaveLength(2)
-}, 30000)
+it(
+  'more than a thousand autosaves remain usable with only a baseline and milestone snapshots',
+  async () => {
+    const { graph, service } = await setup()
+    for (let index = 0; index < 1005; index++)
+      await service.saveDraft('pol-assembly-1', {
+        ...emptyDraft(),
+        text: `自己的第 ${index} 次编辑`,
+      })
+    expect((await graph.load()).snapshots).toHaveLength(1)
+    expect((await service.loadState()).drafts['pol-assembly-1'].text).toBe('自己的第 1004 次编辑')
+    await service.submitAnswer('pol-assembly-1', { ...emptyDraft(), text: '自己的第 1004 次编辑' })
+    expect((await graph.load()).snapshots).toHaveLength(2)
+    // This checks snapshot cardinality after 1005 real durable writes, not a disk-speed
+    // contract. Windows hosted fsync latency can exceed 30s even with one test worker.
+  },
+  process.platform === 'win32' ? 90000 : 30000,
+)
 it('a corrupted optional graph never blocks autosave or local submission, and is never called independent', async () => {
   const { service, dir } = await setup()
   const { writeFile, readFile } = await import('node:fs/promises')
