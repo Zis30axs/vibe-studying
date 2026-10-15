@@ -1,0 +1,619 @@
+/* Subtle UI polish: all colors follow appearance variables; math plots and PDFs remain unchanged. */
+.workspace-shell {
+  --ui-fast: 140ms;
+  --ui-enter: 230ms;
+  --ui-ease: cubic-bezier(0.2, 0.75, 0.25, 1);
+}
+:root .workspace-shell .sidebar {
+  background: color-mix(in srgb, var(--app-surface) 74%, var(--app-surface-muted));
+  border-right: 1px solid var(--app-border);
+}
+:root .workspace-shell .brand-mark {
+  background: var(--app-accent-solid);
+  border-radius: 11px;
+}
+.workspace-shell .nav-item {
+  position: relative;
+  border-radius: 11px;
+  margin-bottom: 5px;
+  transition:
+    background-color var(--ui-fast),
+    color var(--ui-fast),
+    box-shadow var(--ui-fast),
+    transform var(--ui-fast);
+}
+.workspace-shell .nav-item:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+:root .workspace-shell .nav-item.active {
+  background: var(--app-accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-accent) 22%, transparent);
+}
+.workspace-shell .nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: 28%;
+  width: 3px;
+  height: 44%;
+  border-radius: 3px;
+  background: var(--app-accent);
+  animation: ui-marker var(--ui-enter) var(--ui-ease);
+}
+:root .workspace-shell .topbar {
+  background: var(--app-surface);
+  gap: 12px;
+  padding-block: 7px;
+}
+.workspace-shell .breadcrumb {
+  font-size: 12px;
+}
+.workspace-shell .topbar-right {
+  min-width: 0;
+  gap: 8px;
+}
+:root .workspace-shell .quick-switch-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--app-muted);
+  background: var(--app-background);
+}
+.quick-switch-trigger > span:first-child {
+  font-size: 20px;
+  line-height: 1;
+}
+.quick-switch-trigger kbd {
+  font:
+    10px ui-monospace,
+    monospace;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  padding: 2px 4px;
+  white-space: nowrap;
+}
+.workspace-shell .page-heading {
+  padding: 5px 2px 8px;
+  animation: ui-enter var(--ui-enter) var(--ui-ease);
+}
+.workspace-shell.is-study-view .page-heading h1 {
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+.workspace-shell .workspace-toolbar {
+  margin-bottom: 7px;
+}
+:root .workspace-shell .workspace-panel-toggles button {
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+:root .workspace-shell .workspace-panel-toggles button[aria-pressed='true'] {
+  background: var(--app-accent-solid);
+  color: var(--on-accent);
+}
+:root .workspace-shell .workspace-answer {
+  box-shadow: 0 3px 16px color-mix(in srgb, var(--app-text) 5%, transparent);
+  border-radius: 14px;
+  border-color: color-mix(in srgb, var(--app-accent) 20%, var(--app-border));
+}
+:root .workspace-shell .workspace-panel {
+  border-radius: 13px;
+  background: var(--app-surface);
+}
+:root .workspace-shell .library-heading,
+:root .workspace-shell .tools-panel-heading {
+  background: var(--app-surface);
+  border-bottom: 1px solid var(--app-border);
+}
+.workspace-shell .library-heading {
+  margin-bottom: 12px;
+}
+.workspace-shell .search-input {
+  border-radius: 8px;
+  min-height: 36px;
+}
+:root .workspace-shell .subject-filters button {
+  border-radius: 7px;
+  padding: 5px 8px;
+}
+:root .workspace-shell .subject-filters button[aria-pressed='true'] {
+  background: var(--app-accent-solid);
+  color: var(--on-accent);
+  border-color: var(--app-accent-solid);
+}
+:root .workspace-shell .question-item {
+  margin: 4px 6px;
+  width: calc(100% - 12px);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  transition:
+    background-color var(--ui-fast),
+    border-color var(--ui-fast);
+}
+:root .workspace-shell .question-item.selected {
+  background: var(--app-accent-soft);
+  border-color: color-mix(in srgb, var(--app-accent) 35%, transparent);
+}
+.workspace-shell .question-item strong {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.workspace-shell .completion {
+  flex-shrink: 0;
+  font-size: 10px;
+  min-width: 20px;
+  color: var(--app-muted);
+}
+.workspace-shell .question-item.selected .completion {
+  color: var(--app-accent);
+}
+.workspace-shell .question-prompt {
+  animation: ui-enter var(--ui-enter) var(--ui-ease);
+}
+.workspace-shell .question-prompt h2 {
+  font-size: 21px;
+  line-height: 1.6;
+  letter-spacing: -0.25px;
+}
+.workspace-shell .question-prompt > p {
+  line-height: 1.95;
+}
+:root .workspace-shell .answer-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--app-surface);
+  border-top: 1px solid var(--app-border);
+  border-bottom: 1px solid var(--app-border);
+}
+.workspace-shell .answer-tabs button {
+  position: relative;
+  transition:
+    color var(--ui-fast),
+    background-color var(--ui-fast);
+}
+.workspace-shell .answer-tabs button[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 10%;
+  right: 10%;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--app-accent);
+  animation: ui-marker var(--ui-enter) var(--ui-ease);
+}
+:root .workspace-shell #answer-text {
+  border-radius: 10px;
+  padding: 14px;
+  line-height: 1.85;
+  min-height: 156px;
+}
+:root .workspace-shell #answer-text:focus {
+  border-color: var(--app-focus);
+}
+.workspace-shell .save-status {
+  font-size: 10px;
+  color: var(--app-muted);
+}
+:root .workspace-shell .exercise-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--app-surface);
+  border-top: 1px solid var(--app-border);
+  box-shadow: 0 -5px 14px color-mix(in srgb, var(--app-text) 3%, transparent);
+}
+.workspace-shell .exercise-actions .primary {
+  border-radius: 9px;
+  min-height: 40px;
+  padding-inline: 22px;
+}
+.workspace-shell
+  :is(
+    .topbar button,
+    .workspace-panel-toggles button,
+    .exercise-actions button,
+    .choices button,
+    .study-paging button
+  ) {
+  transition:
+    background-color var(--ui-fast),
+    color var(--ui-fast),
+    border-color var(--ui-fast),
+    transform var(--ui-fast);
+}
+.workspace-shell :is(.exercise-actions .primary, .import-button):hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.workspace-shell
+  :is(.exercise-actions button, .choices button, .study-paging button):active:not(:disabled) {
+  transform: scale(0.985);
+}
+.workspace-shell :is(.review-panel, .error-banner, .success-banner) {
+  animation: ui-enter var(--ui-enter) var(--ui-ease);
+}
+.workspace-shell .workspace-drawer:not([hidden]) {
+  animation: ui-drawer 180ms var(--ui-ease);
+}
+.workspace-shell .workspace-scrim {
+  animation: ui-fade 160ms ease-out;
+}
+.workspace-shell .resizable-study-layout {
+  height: calc(100dvh - 232px);
+}
+.study-navigator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 10px;
+  background: var(--app-surface);
+  font-size: 11px;
+}
+.study-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.study-current > span:last-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--app-muted);
+}
+.study-subject {
+  flex-shrink: 0;
+  padding: 3px 7px;
+  border-radius: 5px;
+  color: var(--app-accent);
+  background: var(--app-accent-soft);
+  font-weight: 600;
+}
+.study-stages {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--app-muted);
+}
+.study-stages span {
+  white-space: nowrap;
+}
+.study-stages [aria-current='step'] {
+  color: var(--app-accent);
+  font-weight: 700;
+}
+.study-stages i {
+  width: 16px;
+  height: 1px;
+  background: var(--app-border);
+}
+.study-paging {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+.study-paging > span {
+  min-width: 38px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--app-muted);
+}
+:root .study-paging button {
+  min-width: 30px;
+  min-height: 28px;
+  padding: 2px 7px;
+  border-radius: 7px;
+  background: var(--app-surface);
+}
+:root .workspace-command {
+  width: min(640px, calc(100vw - 28px));
+  max-width: calc(100vw - 28px);
+  max-height: min(720px, calc(100dvh - 40px));
+  margin: max(20px, 9vh) auto auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 18px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  box-shadow: 0 20px 80px #0004;
+}
+.workspace-command[open] {
+  display: flex;
+  flex-direction: column;
+  animation: ui-command 180ms var(--ui-ease);
+}
+.workspace-command::backdrop {
+  background: #15122088;
+}
+.command-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 22px 12px;
+  gap: 12px;
+}
+.command-eyebrow {
+  color: var(--app-accent);
+  font:
+    10px ui-monospace,
+    monospace;
+  letter-spacing: 2px;
+}
+.command-heading h2 {
+  font-size: 19px;
+  margin: 5px 0 0;
+}
+.command-heading button {
+  font-size: 11px;
+  border-radius: 6px;
+  padding: 4px 7px;
+}
+.command-search {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 0 20px 14px;
+  border-bottom: 1px solid var(--app-border);
+}
+.command-search > span {
+  font-size: 26px;
+  color: var(--app-muted);
+}
+:root .command-search input {
+  width: 100%;
+  min-width: 0;
+  border-radius: 9px;
+  padding: 12px;
+  background: var(--app-input);
+  font-size: 14px;
+}
+.command-results {
+  overflow: auto;
+  min-height: 0;
+  padding: 8px;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.command-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background-color 100ms;
+}
+.command-option[aria-selected='true'] {
+  background: var(--app-accent-soft);
+  border-color: color-mix(in srgb, var(--app-accent) 30%, transparent);
+}
+.command-option[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: wait;
+}
+.command-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  color: var(--app-accent);
+  background: var(--app-surface);
+  font-size: 18px;
+}
+.command-copy {
+  flex: 1;
+  min-width: 0;
+}
+.command-copy strong,
+.command-copy small {
+  display: block;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.command-copy strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.command-copy small {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--app-muted);
+}
+.command-kind {
+  font-size: 10px;
+  color: var(--app-muted);
+  flex-shrink: 0;
+}
+.command-empty {
+  padding: 30px;
+  font-size: 13px;
+  color: var(--app-muted);
+  text-align: center;
+}
+.workspace-command footer {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 20px;
+  border-top: 1px solid var(--app-border);
+  background: var(--app-background);
+  color: var(--app-muted);
+  font-size: 10px;
+}
+.workspace-loading {
+  padding: 12px 0;
+  color: var(--app-muted);
+}
+.workspace-loading > div {
+  display: grid;
+  grid-template-columns: 1fr 3fr 1.5fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+.workspace-loading span {
+  display: block;
+  height: 55vh;
+  min-height: 240px;
+  border-radius: 14px;
+  background: linear-gradient(
+    110deg,
+    var(--app-surface-muted) 20%,
+    var(--app-surface) 45%,
+    var(--app-surface-muted) 70%
+  );
+  background-size: 250% 100%;
+  animation: ui-loading 1.6s ease-in-out infinite;
+}
+@keyframes ui-enter {
+  from {
+    opacity: 0.25;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ui-marker {
+  from {
+    opacity: 0;
+    scale: 0.5 1;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+@keyframes ui-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes ui-drawer {
+  from {
+    opacity: 0.4;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ui-command {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ui-loading {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+@media (max-width: 1200px) {
+  .workspace-shell .quick-switch-trigger kbd {
+    display: none;
+  }
+}
+@media (max-width: 900px) {
+  .study-stages {
+    display: none;
+  }
+  .workspace-shell .quick-switch-trigger {
+    margin-right: auto;
+  }
+}
+@media (max-width: 650px) {
+  .workspace-shell .quick-switch-label {
+    display: none;
+  }
+  :root .workspace-shell .topbar-right {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  :root .workspace-shell .topbar {
+    padding-inline: 8px;
+  }
+  :root .workspace-shell .quick-switch-trigger {
+    padding: 6px 8px;
+  }
+  .workspace-shell.is-study-view .page-heading h1 {
+    font-size: 18px;
+  }
+  :root .workspace-shell .workspace-panel-toggles button {
+    padding: 5px 7px;
+    font-size: 11px;
+  }
+  .study-navigator {
+    gap: 6px;
+    padding-inline: 8px;
+  }
+  .study-paging {
+    gap: 5px;
+    margin-left: 0;
+  }
+  .workspace-shell .resizable-study-layout {
+    height: calc(100dvh - 237px);
+  }
+  .workspace-shell .question-prompt h2 {
+    font-size: 18px;
+  }
+  .workspace-loading > div {
+    grid-template-columns: 1fr;
+  }
+  .workspace-loading span:not(:first-child) {
+    display: none;
+  }
+  .command-kind {
+    display: none;
+  }
+}
+/* Never animate panel widths or math coordinates; animation does not remount the editor. */
+.workspace-shell[data-motion='reduce'] *,
+.workspace-shell[data-motion='reduce'] *::before,
+.workspace-shell[data-motion='reduce'] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .workspace-shell *,
+  .workspace-shell *::before,
+  .workspace-shell *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

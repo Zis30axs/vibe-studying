@@ -19,6 +19,8 @@ export function useWorkspaceLayout() {
       return defaultWorkspaceLayout()
     }
   })
+  const beforeFocus = useRef<typeof preferences | null>(null)
+  const focusActive = Object.values(preferences.collapsed).every(Boolean)
   const [viewport, setViewport] = useState(() => window.innerWidth)
   const [drawer, setDrawer] = useState<DrawerPanel | null>(null)
   const opener = useRef<HTMLElement | null>(null)
@@ -122,6 +124,7 @@ export function useWorkspaceLayout() {
   }, [questionsVisible, toolsVisible])
   return {
     preferences,
+    focusActive,
     geometry,
     drawer,
     questionsVisible,
@@ -138,10 +141,17 @@ export function useWorkspaceLayout() {
         widths: { ...previous.widths, [panel]: PANEL_LIMITS[panel].default },
       })),
     reset: () => {
+      beforeFocus.current = null
       setPreferences(defaultWorkspaceLayout())
       setDrawer(null)
     },
+    restoreFocus: () => {
+      setPreferences(beforeFocus.current ?? defaultWorkspaceLayout())
+      beforeFocus.current = null
+      setDrawer(null)
+    },
     focusAnswer: () => {
+      if (!focusActive) beforeFocus.current = structuredClone(preferences)
       setPreferences((previous) => ({
         ...previous,
         collapsed: { navigation: true, questions: true, tools: true },

@@ -4,6 +4,7 @@ import App from './App'
 import './styles.css'
 import './components/compact.css'
 import './components/appearance.css'
+import './components/workspace-experience.css'
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />

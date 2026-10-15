@@ -1,3 +1,10 @@
+import { WorkspaceQuickSwitch } from './components/WorkspaceQuickSwitch'
+import { StudyNavigator, WorkspaceLoading } from './components/StudyNavigator'
+import {
+  hasWorkspaceDraft,
+  parseWorkspaceUi,
+  WORKSPACE_UI_KEY,
+} from './domain/workspace-experience'
 import { GeometryFigure } from './components/GeometryFigure'
 import { LearningGraph } from './components/LearningGraph'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
@@ -245,6 +252,22 @@ export default function App() {
   latestQuestionsRef.current = questions
   const [capabilities, setCapabilities] = useState<Capabilities>()
   const [loaded, setLoaded] = useState(false)
+  const [quickSwitch, setQuickSwitch] = useState(false)
+  const [ui, setUi] = useState(() => {
+    try {
+      return parseWorkspaceUi(localStorage.getItem(WORKSPACE_UI_KEY))
+    } catch {
+      return parseWorkspaceUi(null)
+    }
+  })
+  const initialQuestionId = useRef(ui.lastQuestionId)
+  useEffect(() => {
+    try {
+      localStorage.setItem(WORKSPACE_UI_KEY, JSON.stringify(ui))
+    } catch {
+      /* A read-only cache cannot interrupt study */
+    }
+  }, [ui])
   const [error, setError] = useState('')
   const [view, setView] = useState<View>('practice')
   const [questionContext, setQuestionContext] = useState<StudyQuestionContext>({
@@ -300,6 +323,22 @@ export default function App() {
     }
   }, [view])
   const isStudyView = isStudyRoute(view)
+  function openQuickSwitch() {
+    if (!loaded || busy || document.querySelector('dialog[open], [aria-modal="true"]')) return
+    setQuickSwitch(true)
+  }
+  useEffect(() => {
+    const keyboard = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey) return
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        if (!loaded || busy || document.querySelector('dialog[open], [aria-modal="true"]')) return
+        event.preventDefault()
+        setQuickSwitch(true)
+      }
+    }
+    document.addEventListener('keydown', keyboard)
+    return () => document.removeEventListener('keydown', keyboard)
+  }, [loaded, busy])
 
   async function load() {
     if (!api) {
@@ -322,7 +361,11 @@ export default function App() {
       setModelProfiles(config)
       if (!config)
         setError('模型设置暂时无法读取；本地练习仍可使用。请检查模型配置文件或恢复备份。')
-      setSelectedId(bank[0]?.id ?? '')
+      setSelectedId(
+        bank.some((question) => question.id === initialQuestionId.current)
+          ? initialQuestionId.current
+          : (bank[0]?.id ?? ''),
+      )
       setLoaded(true)
     } catch (err) {
       setError(errorText(err))
@@ -335,6 +378,14 @@ export default function App() {
   const filtered = filterStudyQuestions(questions, questionView, subject, query)
   const selected = filtered.find((q) => q.id === selectedId) ?? filtered[0]
   currentQuestionId.current = selected?.id
+  useEffect(() => {
+    if (loaded && isStudyView && selected)
+      setUi((previous) =>
+        previous.lastQuestionId === selected.id
+          ? previous
+          : { ...previous, lastQuestionId: selected.id },
+      )
+  }, [loaded, isStudyView, selected?.id])
   useEffect(() => {
     setCloudConsent(false)
   }, [selected?.id, provider, modelConfig?.revision])
@@ -380,6 +431,20 @@ export default function App() {
         setTab('answer')
       }
       setMessage('')
+    }
+    if (view === 'adapters' && settingsNavigationGuard.current)
+      settingsNavigationGuard.current(navigate)
+    else navigate()
+  }
+  function openQuestionFromSearch(id: string) {
+    if (busy || !questions.some((question) => question.id === id)) return
+    const navigate = () => {
+      setQuestionContext({ view: 'practice', subject: 'all', query: '', selectedId: id })
+      setView('practice')
+      setTab('answer')
+      setKnowledgeExcerpts([])
+      setMessage('')
+      layout.closeDrawers()
     }
     if (view === 'adapters' && settingsNavigationGuard.current)
       settingsNavigationGuard.current(navigate)
@@ -485,10 +550,27 @@ export default function App() {
 
   return (
     <div
+      data-motion={ui.motion}
+      data-focus={layout.focusActive}
       className={`app-shell workspace-shell ${layout.geometry.navigationCollapsed ? 'navigation-collapsed' : ''} ${isStudyView ? 'is-study-view' : ''}`}
       style={{ '--navigation-width': `${layout.geometry.navigationWidth}px` } as CSSProperties}
     >
       <WallpaperLayer appearance={appearance} />
+      <WorkspaceQuickSwitch
+        open={quickSwitch}
+        onClose={() => setQuickSwitch(false)}
+        questions={questions}
+        disabled={busy}
+        motion={ui.motion}
+        onMotion={() =>
+          setUi((previous) => ({
+            ...previous,
+            motion: previous.motion === 'reduce' ? 'system' : 'reduce',
+          }))
+        }
+        onView={changeView}
+        onQuestion={openQuestionFromSearch}
+      />
       <aside id="workspace-navigation" className="sidebar" aria-label="工作区侧栏">
         <button
           className="navigation-toggle"
@@ -540,7 +622,7 @@ export default function App() {
             <br />
             把知识连接起来。
           </p>
-          <span className="edition">MVP / 01</span>
+          <span className="edition">EXAMCRAFT / {appVersion}</span>
         </div>
         <div className="local-status">
           <span className="status-dot" />
@@ -569,6 +651,17 @@ export default function App() {
             工作空间 <span>/</span> <b>{navigation.find((n) => n.id === view)?.label}</b>
           </div>
           <div className="topbar-right">
+            <button
+              className="quick-switch-trigger"
+              aria-label="快速查找题目与工具"
+              title="快速查找 · Ctrl / Cmd + K"
+              disabled={!loaded || busy}
+              onClick={openQuickSwitch}
+            >
+              <span aria-hidden="true">⌕</span>
+              <span className="quick-switch-label">查找题目与工具</span>
+              <kbd>⌘ / Ctrl K</kbd>
+            </button>
             <button
               className="appearance-shortcut"
               disabled={busy}
@@ -611,10 +704,10 @@ export default function App() {
               {message}
             </div>
           )}
-          {!loaded && !error && <p role="status">正在打开本地学习空间…</p>}
+          {!loaded && !error && <WorkspaceLoading />}
           {loaded && (
             <>
-              <div className="page-heading">
+              <div className="page-heading" key={view}>
                 <div>
                   <div className="eyebrow">
                     {view === 'formulas'
@@ -783,12 +876,23 @@ export default function App() {
                       >
                         <span aria-hidden="true">◫</span> 工具与顾问
                       </button>
-                      <button onClick={layout.focusAnswer} title="收起侧栏，把空间留给答案">
-                        专注作答
+                      <button
+                        onClick={layout.focusActive ? layout.restoreFocus : layout.focusAnswer}
+                        aria-pressed={layout.focusActive}
+                        title="收起侧栏专注作答，再次点击恢复原布局"
+                      >
+                        {layout.focusActive ? '退出专注' : '专注作答'}
                       </button>
                     </div>
                     <span className="layout-hint">拖动分隔线调整 · 双击还原</span>
                   </div>
+                  <StudyNavigator
+                    questions={filtered}
+                    selected={selected}
+                    reviewing={tab === 'review'}
+                    disabled={busy}
+                    onSelect={selectQuestion}
+                  />
                   {layout.drawer && (
                     <button
                       className="workspace-scrim"
@@ -868,6 +972,8 @@ export default function App() {
                           <button
                             key={q.id}
                             className={`question-item ${selected?.id === q.id ? 'selected' : ''}`}
+                            aria-current={selected?.id === q.id ? 'true' : undefined}
+                            disabled={busy}
                             onClick={() => selectQuestion(q.id)}
                           >
                             <span className="question-number">
@@ -881,7 +987,11 @@ export default function App() {
                               <small>{q.tags.slice(0, 2).join(' / ')}</small>
                             </span>
                             <span className="completion">
-                              {state.attempts.some((a) => a.questionId === q.id) ? '✓' : '›'}
+                              {state.attempts.some((a) => a.questionId === q.id)
+                                ? '已提交'
+                                : hasWorkspaceDraft(state.drafts[q.id])
+                                  ? '草稿'
+                                  : '›'}
                             </span>
                           </button>
                         ))}
@@ -930,7 +1040,11 @@ export default function App() {
                             </div>
                             <span className="question-id">{selected.id}</span>
                           </div>
-                          <div className="question-prompt" data-advisor-source="question">
+                          <div
+                            className="question-prompt"
+                            key={selected.id}
+                            data-advisor-source="question"
+                          >
                             <h2>{selected.title}</h2>
                             <p>{selected.prompt}</p>
                             {selected.geometry && <GeometryFigure scene={selected.geometry} />}
