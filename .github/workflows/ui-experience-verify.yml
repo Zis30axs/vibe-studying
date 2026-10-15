@@ -52,6 +52,17 @@ jobs:
           fs.writeFileSync(root+'/manifest.json',JSON.stringify(manifest))
           console.log('Applied',keys.length,'verified paths from baseline',baseline)
           NODE
+      - name: Disambiguate motion display preference from settings navigation
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          const path = 'src/domain/workspace-experience.ts'
+          const old = fs.readFileSync(path,'utf8')
+          const next = old.replace('遵循系统的减少动态效果设置','遵循系统减少动态效果')
+          if (next === old) throw new Error('Expected motion description was not found')
+          fs.writeFileSync(path,next)
+          NODE
       - run: npm ci
       - name: Format delivered code and docs only
         shell: bash
