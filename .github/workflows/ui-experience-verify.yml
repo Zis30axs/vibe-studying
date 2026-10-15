@@ -1,0 +1,105 @@
+name: Verify workspace UI upgrade
+on:
+  push:
+    branches:
+      - automation/ui-v051-transport
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Apply SHA256 and blob-verified UI source patch
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          import { createHash } from 'node:crypto'
+          import { brotliDecompressSync } from 'node:zlib'
+          import { execFileSync } from 'node:child_process'
+          const root = '.ui-v051'
+          const encoded = Array.from({length:4}, (_,i)=>fs.readFileSync(root+'/chunk-'+i+'.txt','utf8')).join('')
+          const digest = createHash('sha256').update(encoded).digest('hex')
+          if (digest !== 'a4489cceb549bdf7ecd70c4548d893f1ef01cff587f961b2a9dc53f2b7a026dc') throw new Error('Transport SHA256 mismatch')
+          const manifest = JSON.parse(brotliDecompressSync(Buffer.from(encoded,'base64')).toString('utf8'))
+          const baseline = '13df685f30ea355bff8bd8bf90df3d4c31c4db52'
+          if (manifest.baseCommit !== baseline || manifest.baseTree !== '3a1e4ba61d5a0b397a8b4c0a329175680c5fd9af') throw new Error('Base commit/tree mismatch')
+          const allowed = new Set(['src/App.tsx','src/main.tsx','src/components/useWorkspaceLayout.ts','src/components/WorkspaceQuickSwitch.tsx','src/components/StudyNavigator.tsx','src/components/workspace-experience.css','src/domain/workspace-experience.ts','tests/workspace-experience.test.ts','tests/browser/workspace-experience.spec.ts','docs/workspace-experience.md','docs/releases/v0.5.1.md','package.json','package-lock.json'])
+          const keys = Object.keys(manifest.files)
+          if (keys.length !== allowed.size || keys.some(key=>!allowed.has(key))) throw new Error('Unexpected patch paths')
+          for (const [path,record] of Object.entries(manifest.files)) {
+            if (record.before) {
+              const actual=execFileSync('git',['hash-object',path],{encoding:'utf8'}).trim()
+              if(actual!==record.before) throw new Error('Base file differs: '+path)
+            } else if (fs.existsSync(path)) throw new Error('Unexpected existing file: '+path)
+          }
+          fs.writeFileSync(root+'/source.patch',manifest.patch)
+          execFileSync('git',['apply','--check',root+'/source.patch'],{stdio:'inherit'})
+          execFileSync('git',['apply',root+'/source.patch'],{stdio:'inherit'})
+          for (const [path,record] of Object.entries(manifest.files)) {
+            const actual=execFileSync('git',['hash-object',path],{encoding:'utf8'}).trim()
+            if(actual!==record.after) throw new Error('Patched content differs: '+path)
+          }
+          fs.writeFileSync(root+'/manifest.json',JSON.stringify(manifest))
+          console.log('Applied',keys.length,'verified paths from baseline',baseline)
+          NODE
+      - run: npm ci
+      - name: Format delivered code and docs only
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          import {execFileSync} from 'node:child_process'
+          const files=Object.keys(JSON.parse(fs.readFileSync('.ui-v051/manifest.json','utf8')).files)
+          execFileSync('npm',['exec','--yes=false','--','prettier','--write',...files],{stdio:'inherit'})
+          NODE
+      - run: npm run check
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - name: Create isolated verified candidate after all checks succeed
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs')
+            const manifest = JSON.parse(fs.readFileSync('.ui-v051/manifest.json','utf8'))
+            const { owner, repo } = context.repo
+            const tree = await github.rest.git.createTree({
+              owner, repo, base_tree: manifest.baseTree,
+              tree: Object.keys(manifest.files).map(path => ({
+                path, mode: '100644', type: 'blob', content: fs.readFileSync(path, 'utf8')
+              }))
+            })
+            const commit = await github.rest.git.createCommit({
+              owner, repo,
+              message: 'feat(ui): streamlined study workspace, command search and gentle motion (v0.5.1)',
+              tree: tree.data.sha, parents: [manifest.baseCommit]
+            })
+            const ref = 'refs/heads/automation/ui-v051-verified'
+            await github.rest.git.createRef({owner,repo,ref,sha:commit.data.sha})
+            fs.writeFileSync('.ui-v051/verified.json', JSON.stringify({
+              commit: commit.data.sha, base: manifest.baseCommit, tree: tree.data.sha,
+              paths: Object.keys(manifest.files)
+            },null,2))
+            core.notice('Verified candidate: '+commit.data.sha)
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: workspace-ui-v051-verified
+          path: .ui-v051/verified.json
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: workspace-ui-v051-test-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
