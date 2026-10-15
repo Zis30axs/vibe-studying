@@ -20,7 +20,6 @@ jobs:
         run: |
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
-          import path from 'node:path';
           import { createHash } from 'node:crypto';
           import { brotliDecompressSync } from 'node:zlib';
           import { execFileSync } from 'node:child_process';
@@ -48,6 +47,8 @@ jobs:
           fs.writeFileSync(`${root}/manifest.json`,JSON.stringify(manifest));
           console.log(`Applied ${allowed.size} verified source/test/documentation files. No user data accessed.`);
           NODE
+      - name: Strengthen legacy byte-preservation tests
+        run: node .geoboard-delivery/refine.mjs
       - run: npm ci
       - name: Format only delivered code and documentation
         run: |
