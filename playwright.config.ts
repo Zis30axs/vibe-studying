@@ -1,7 +1,8 @@
 import { defineConfig } from '@playwright/test'
-// Inherited by each Electron launch, including fixtures that copy process.env.
-// Native windows and unexpected OS dialogs remain hidden on developer machines.
-process.env.EXAMCRAFT_E2E_SILENT = '1'
+// Keep developer machines silent. Hosted Windows has its own virtual desktop:
+// use normal native activation there for real mouse selection/drag regressions.
+process.env.EXAMCRAFT_E2E_SILENT =
+  process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_OS === 'Windows' ? '0' : '1'
 export default defineConfig({
   testDir: 'tests/e2e',
   outputDir: 'test-results/desktop',

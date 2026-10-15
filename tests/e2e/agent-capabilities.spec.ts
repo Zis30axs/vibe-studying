@@ -42,6 +42,8 @@ async function launch() {
   ])
     delete env[key]
   env.EXAMCRAFT_USER_DATA = directory
+  // Retain explicit silent-window coverage even on the hosted virtual desktop.
+  env.EXAMCRAFT_E2E_SILENT = '1'
   app = await electron.launch({ args: ['.'], env })
   // Main registers IPC asynchronously during startup. Install fixture handlers
   // only after the real window is ready, so fixtures cannot race registerIpc.
