@@ -10,7 +10,7 @@
 
 在 [GitHub Releases](https://github.com/Zis30axs/vibe-studying/releases) 下载对应版本的 `ExamCraft-<版本>-win-x64.zip`，完整解压后打开 `ExamCraft.exe`。便携包包括 Electron 运行时，无需安装 Node.js；不要只移动 EXE，须保留旁边所有文件。
 
-这是未签名的 Windows x64 便携应用。Windows 可能提示未知发布者；只运行你确认可信的下载，并可用同版 `SHA256SUMS.txt` 校验文件。默认学习数据仍在 `%APPDATA%\ExamCraft`，升级前先退出应用并备份。应用内部版本为 0.4.5；此手工便携包保留 Electron 的默认 EXE 图标与 Windows 文件属性，不代表应用内版本。没有自动更新器。
+这是未签名的 Windows x64 便携应用。Windows 可能提示未知发布者；只运行你确认可信的下载，并可用同版 `SHA256SUMS.txt` 校验文件。默认学习数据仍在 `%APPDATA%\ExamCraft`，升级前先退出应用并备份。应用内部版本为 0.6.0；此手工便携包保留 Electron 的默认 EXE 图标与 Windows 文件属性，不代表应用内版本。没有自动更新器。
 
 开发者可在 Windows x64 干净提交检出中运行：
 
@@ -22,7 +22,7 @@ npm run package:win
 npm run test:packaged
 ```
 
-产物位于 `work/release/`：可运行 Windows ZIP、对应源码 ZIP、SHA-256 校验文件。GitHub 发布流程只在 Linux/Windows 检查、全部桌面用例及解压后可执行文件烟雾测试通过后发布，且不覆盖已有版本。详见 [0.2.0 发布说明](docs/releases/v0.2.0.md)。
+产物位于 `work/release/`：可运行 Windows ZIP、对应源码 ZIP、SHA-256 校验文件。GitHub 发布流程只在 Linux/Windows 检查、全部桌面用例及解压后可执行文件烟雾测试通过后发布，且不覆盖已有版本。详见 [0.6.0 发布说明](docs/releases/v0.6.0.md)。
 
 ## 本地运行
 

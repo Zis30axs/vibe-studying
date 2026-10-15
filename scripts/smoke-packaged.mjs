@@ -87,6 +87,18 @@ try {
       console.error('Packaged startup page errors:', errors)
       throw error
     }
+    // Block the provider boundary for the whole packaged session. This is set
+    // after real startup, before exercising any configuration or model action.
+    await app.evaluate(() => {
+      globalThis.packagedProviderRequests = 0
+      const rejectProvider = () => {
+        globalThis.packagedProviderRequests++
+        throw new Error('Provider requests are disabled in packaged smoke tests')
+      }
+      process.getBuiltinModule('http').request = rejectProvider
+      process.getBuiltinModule('https').request = rejectProvider
+      process.getBuiltinModule('module').syncBuiltinESMExports()
+    })
     await expect(page.locator('.page-footer')).toContainText(pkg.version)
     assert.equal(page.url(), 'examcraft://app/index.html')
     await expect(page.getByTestId('activity-heatmap')).toHaveCount(0)
@@ -244,6 +256,25 @@ try {
   await expect(page.locator('.agent-scope-summary')).toContainText(contextTitle)
   await expect(answerSnapshot).toBeEnabled()
   await expect(answerSnapshot).not.toBeChecked()
+  const recordsBeforeSkills = await page.evaluate(() => window.examcraft.loadState())
+  for (const title of [
+    '解析几何分步引导',
+    '错题原因自查',
+    '针对性变式练习',
+    '知识点主动复习',
+    '教材证据检索',
+  ])
+    await expect(page.getByRole('button', { name: title, exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '解析几何分步引导', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: '本次任务', exact: true })).toHaveValue(
+    /垂足与距离/u,
+  )
+  await expect(
+    page.getByRole('button', { name: '开始本次 Agent 任务', exact: true }),
+  ).toBeDisabled()
+  await expect(answerSnapshot).not.toBeChecked()
+  assert.deepEqual(await page.evaluate(() => window.examcraft.loadState()), recordsBeforeSkills)
+  assert.equal(await app.evaluate(() => globalThis.packagedProviderRequests), 0)
   await agentSubject.selectOption('geography')
   await expect(answerSnapshot).toBeDisabled()
   await expect(answerSnapshot).not.toBeChecked()
@@ -402,6 +433,7 @@ try {
   )
   assert.equal(repeated.duplicateCount, 6)
   assert.equal(repeated.importedCount, 0)
+  assert.equal(await app.evaluate(() => globalThis.packagedProviderRequests), 0)
   await app.close()
   app = undefined
   page = await launch()
@@ -451,6 +483,68 @@ try {
     .getByRole('button', { name: '题库与 Agent Connections', exact: true })
     .click()
   const settings = page.getByRole('region', { name: '模型设置', exact: true })
+  // Exercise the new packaged UI, preload and independent credential store.
+  // Saving a synthetic session key must not diagnose or upload any content.
+  const recordsBeforeEmbedding = await page.evaluate(() => window.examcraft.loadState())
+  const embedding = page.getByRole('region', { name: 'Embedding 设置与检索', exact: true })
+  await expect(
+    embedding.getByRole('button', { name: '保存 Embedding 设置', exact: true }),
+  ).toBeEnabled()
+  const embeddingBefore = await page.evaluate(() => window.examcraft.getEmbeddingConfig())
+  assert.equal(embeddingBefore.configured, false)
+  const syntheticEmbeddingKey = 'synthetic-packaged-embedding-key-never-real'
+  await embedding.getByRole('checkbox', { name: '启用独立 Embedding 服务', exact: true }).check()
+  await embedding
+    .getByLabel('Embedding API 地址', { exact: true })
+    .fill('https://embedding-smoke.invalid/v1')
+  await embedding
+    .getByLabel('Embedding 模型 ID', { exact: true })
+    .fill('synthetic-packaged-embedding')
+  await embedding.getByLabel('Embedding API Key', { exact: true }).fill(syntheticEmbeddingKey)
+  await expect(
+    embedding.getByRole('checkbox', { name: /使用系统加密保存这个新 Embedding Key/ }),
+  ).not.toBeChecked()
+  await embedding.getByRole('button', { name: '保存 Embedding 设置', exact: true }).click()
+  await expect(embedding.getByRole('status')).toContainText('未发出连接测试或上传教材')
+  await expect(embedding.getByLabel('Embedding API Key', { exact: true })).toHaveValue('')
+  const embeddingConfig = await page.evaluate(() => window.examcraft.getEmbeddingConfig())
+  assert.equal(embeddingConfig.baseUrl, 'https://embedding-smoke.invalid/v1')
+  assert.equal(embeddingConfig.model, 'synthetic-packaged-embedding')
+  assert.equal(embeddingConfig.configured, true)
+  assert.equal(embeddingConfig.keyStatus, 'session')
+  assert.ok(!JSON.stringify(embeddingConfig).includes(syntheticEmbeddingKey))
+  assert.ok(!JSON.stringify(embeddingConfig).includes('encryptedApiKey'))
+  assert.ok(
+    !(await readFile(join(userData, 'embedding-config.json'), 'utf8')).includes(
+      syntheticEmbeddingKey,
+    ),
+  )
+  const browserStorage = await page.evaluate(() =>
+    JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }),
+  )
+  assert.ok(!browserStorage.includes(syntheticEmbeddingKey))
+  const localEmbeddingResult = await page.evaluate(
+    (id) =>
+      window.examcraft.searchEmbeddingLocal({
+        subject: 'math',
+        documentId: id,
+        startPage: 1,
+        endPage: 1,
+        query: 'synthetic',
+      }),
+    cached.find((document) => document.subject === 'math').id,
+  )
+  assert.equal(localEmbeddingResult.mode, 'keyword')
+  assert.ok(localEmbeddingResult.hits.length > 0)
+  assert.ok(
+    localEmbeddingResult.hits.every((hit) => hit.subject === 'math' && hit.pageNumber === 1),
+  )
+  assert.deepEqual(
+    await page.evaluate(() => window.examcraft.getModelProfiles()),
+    profilesBeforeDiagnostics,
+  )
+  assert.deepEqual(await page.evaluate(() => window.examcraft.loadState()), recordsBeforeEmbedding)
+  assert.equal(await app.evaluate(() => globalThis.packagedProviderRequests), 0)
   const diagnostics = settings.getByRole('region', { name: '模型连接诊断', exact: true })
   await settings.getByLabel('接口基础地址', { exact: true }).fill('https://smoke.invalid/v1')
   await settings.getByLabel('模型名称', { exact: true }).fill('synthetic-smoke-model')
@@ -513,8 +607,9 @@ try {
   )
   await expect(page.getByRole('alert')).toHaveCount(0)
   assert.deepEqual(errors, [])
+  assert.equal(await app.evaluate(() => globalThis.packagedProviderRequests), 0)
   console.log(
-    `Packaged smoke passed: ${artifact}.zip; packaged mode, production protocol, feature panels, submit/history, perpendicular construction and editable xyz geometry, Agent question scope and explicit snapshot opt-in, DNS/TLS/HTTP diagnostic display (UI-only IPC mocks), offline formula search/conditions/favorites, six-subject PDF package import/search/canvas, dedupe and restart persistence.`,
+    `Packaged smoke passed: ${artifact}.zip; packaged mode, production protocol, feature panels, submit/history, perpendicular construction and editable xyz geometry, Agent question scope and explicit snapshot opt-in, five Skill cards without automatic execution, independent Embedding session credentials and local keyword fallback with no provider requests or learning-record changes, DNS/TLS/HTTP diagnostic display (UI-only IPC mocks), offline formula search/conditions/favorites, six-subject PDF package import/search/canvas, dedupe and restart persistence.`,
   )
 } finally {
   await app?.close()
