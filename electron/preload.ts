@@ -2,6 +2,12 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { ExamCraftApi } from '../src/shared/types'
 
 const api: ExamCraftApi = Object.freeze<ExamCraftApi>({
+  getMathChallenges: () => ipcRenderer.invoke('examcraft:math-challenges'),
+  startMathChallenge: (input) => ipcRenderer.invoke('examcraft:start-math-challenge', input),
+  getMathChallenge: (id) => ipcRenderer.invoke('examcraft:get-math-challenge', id),
+  saveMathChallenge: (input) => ipcRenderer.invoke('examcraft:save-math-challenge', input),
+  submitMathChallenge: (input) => ipcRenderer.invoke('examcraft:submit-math-challenge', input),
+  gradeMathChallenge: (input) => ipcRenderer.invoke('examcraft:grade-math-challenge', input),
   getEmbeddingConfig: () => ipcRenderer.invoke('examcraft:get-embedding-config'),
   saveEmbeddingConfig: (input) => ipcRenderer.invoke('examcraft:save-embedding-config', input),
   diagnoseEmbedding: (input) => ipcRenderer.invoke('examcraft:diagnose-embedding', input),

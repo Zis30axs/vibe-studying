@@ -37,6 +37,7 @@ import {
 import { canceledKnowledgePackImport } from '../src/shared/knowledge-pack'
 import { readSelectedPdf } from '../src/adapters/local-pdf-file'
 import { LocalQuestionBank } from '../src/adapters/local-question-bank'
+import { MathChallengeService } from '../src/adapters/math-challenge-service'
 import { GitHubProfileService } from '../src/adapters/github-profile-service'
 import { modelConsentRevokeSchema, type ModelConsentGrantInput } from '../src/shared/model-consent'
 import { ModelConsentStore } from '../src/adapters/model-consent-store'
@@ -157,6 +158,14 @@ function registerIpc(
       return trackWrite(Promise.resolve(result))
     })
   }
+  const challenges = new MathChallengeService(app.getPath('userData'))
+  // Reads may finalize a sitting that expired while the app was closed; track those writes too.
+  handle('examcraft:math-challenges', () => challenges.getMathChallenges(), true)
+  handle('examcraft:start-math-challenge', (input) => challenges.startMathChallenge(input), true)
+  handle('examcraft:get-math-challenge', (id) => challenges.getMathChallenge(id), true)
+  handle('examcraft:save-math-challenge', (input) => challenges.saveMathChallenge(input), true)
+  handle('examcraft:submit-math-challenge', (input) => challenges.submitMathChallenge(input), true)
+  handle('examcraft:grade-math-challenge', (input) => challenges.gradeMathChallenge(input), true)
   // Appearance is intentionally outside StudyService, model payloads, exports and debug logs.
   const appearance = new WallpaperStore(app.getPath('userData'), (bytes) => {
     inspectWallpaperRaster(bytes)

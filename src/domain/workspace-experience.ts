@@ -2,7 +2,15 @@ import type { AnswerDraft, StudentQuestion } from '../shared/types'
 import { subjectLabel } from '../shared/subjects'
 
 export type WorkspaceView =
-  'practice' | 'math' | 'politics' | 'geography' | 'formulas' | 'agent' | 'history' | 'adapters'
+  | 'practice'
+  | 'math'
+  | 'challenge'
+  | 'politics'
+  | 'geography'
+  | 'formulas'
+  | 'agent'
+  | 'history'
+  | 'adapters'
 export const workspaceNavigation: {
   id: WorkspaceView
   icon: string
@@ -11,6 +19,7 @@ export const workspaceNavigation: {
 }[] = [
   { id: 'practice', icon: '▤', label: '题目练习', caption: 'Practice' },
   { id: 'math', icon: 'ƒ', label: '数学工作台', caption: 'Math lab' },
+  { id: 'challenge', icon: '◈', label: '数学挑战', caption: 'Comprehensive paper' },
   { id: 'politics', icon: '▦', label: '文科组装', caption: 'Argument builder' },
   { id: 'geography', icon: '◎', label: '地理工作台', caption: 'Geo canvas' },
   { id: 'formulas', icon: '∑', label: '公式速查', caption: 'Formula reference' },

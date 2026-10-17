@@ -61,10 +61,11 @@ describe('workspace experience (display-only)', () => {
       expect(JSON.stringify(d)).toBe(bytes)
     }
   })
-  it('offers all original routes and motion toggle', () => {
-    expect(workspaceNavigation).toHaveLength(8)
-    expect(new Set(workspaceNavigation.map((v) => v.id)).size).toBe(8)
-    expect(findWorkspaceCommands([], '', 'system')).toHaveLength(9)
+  it('offers the comprehensive challenge route alongside existing routes and motion toggle', () => {
+    expect(workspaceNavigation).toHaveLength(9)
+    expect(new Set(workspaceNavigation.map((v) => v.id)).size).toBe(9)
+    expect(findWorkspaceCommands([], '', 'system')).toHaveLength(10)
+    expect(findWorkspaceCommands([], '数学挑战', 'system')[0].target).toBe('challenge')
     expect(findWorkspaceCommands([], '设置', 'system')[0].target).toBe('adapters')
   })
   it('matches combined subject + tag, case and fullwidth identifiers', () => {

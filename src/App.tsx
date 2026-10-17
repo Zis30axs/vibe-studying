@@ -1,4 +1,5 @@
 import { WorkspaceQuickSwitch } from './components/WorkspaceQuickSwitch'
+import { MathChallenge } from './components/MathChallenge'
 import { StudyNavigator, WorkspaceLoading } from './components/StudyNavigator'
 import {
   hasWorkspaceDraft,
@@ -63,10 +64,19 @@ import { GeographyFigure } from './components/GeographyFigure'
 import { TerrainFigure, TerrainReviewProfile } from './components/TerrainFigure'
 
 type View =
-  'practice' | 'math' | 'politics' | 'geography' | 'formulas' | 'agent' | 'history' | 'adapters'
+  | 'practice'
+  | 'math'
+  | 'challenge'
+  | 'politics'
+  | 'geography'
+  | 'formulas'
+  | 'agent'
+  | 'history'
+  | 'adapters'
 const navigation: { id: View; icon: string; label: string; caption: string }[] = [
   { id: 'practice', icon: '▤', label: '题目练习', caption: 'Practice' },
   { id: 'math', icon: 'ƒ', label: '数学工作台', caption: 'Math lab' },
+  { id: 'challenge', icon: '◈', label: '数学挑战', caption: 'Comprehensive paper' },
   { id: 'politics', icon: '▦', label: '文科组装', caption: 'Argument builder' },
   { id: 'geography', icon: '◎', label: '地理工作台', caption: 'Geo canvas' },
   { id: 'formulas', icon: '∑', label: '公式速查', caption: 'Formula reference' },
@@ -271,6 +281,10 @@ export default function App() {
   }, [ui])
   const [error, setError] = useState('')
   const [view, setView] = useState<View>('practice')
+  const [challengeVisited, setChallengeVisited] = useState(false)
+  useEffect(() => {
+    if (view === 'challenge') setChallengeVisited(true)
+  }, [view])
   const [questionContext, setQuestionContext] = useState<StudyQuestionContext>({
     view: 'practice',
     subject: 'all',
@@ -708,52 +722,54 @@ export default function App() {
           {!loaded && !error && <WorkspaceLoading />}
           {loaded && (
             <>
-              <div className="page-heading" key={view}>
-                <div>
-                  <div className="eyebrow">
-                    {view === 'formulas'
-                      ? 'LOOK UP, UNDERSTAND, APPLY'
-                      : view === 'agent'
-                        ? 'BOUNDED AGENT, EXPLICIT TOOLS'
-                        : view === 'history'
-                          ? 'REFLECT & GROW'
-                          : view === 'adapters'
-                            ? 'YOUR KNOWLEDGE, CONNECTED'
-                            : 'A LITTLE PROGRESS, EVERY DAY'}
+              {view !== 'challenge' && (
+                <div className="page-heading" key={view}>
+                  <div>
+                    <div className="eyebrow">
+                      {view === 'formulas'
+                        ? 'LOOK UP, UNDERSTAND, APPLY'
+                        : view === 'agent'
+                          ? 'BOUNDED AGENT, EXPLICIT TOOLS'
+                          : view === 'history'
+                            ? 'REFLECT & GROW'
+                            : view === 'adapters'
+                              ? 'YOUR KNOWLEDGE, CONNECTED'
+                              : 'A LITTLE PROGRESS, EVERY DAY'}
+                    </div>
+                    <h1>
+                      {view === 'practice'
+                        ? '今天，理解得更深一点。'
+                        : view === 'math'
+                          ? '把公式，变成可探索的图像。'
+                          : view === 'politics'
+                            ? '让每个观点，有理有据。'
+                            : view === 'geography'
+                              ? '在坐标里，发现联系。'
+                              : view === 'formulas'
+                                ? '把每个公式，用在合适的地方。'
+                                : view === 'agent'
+                                  ? '把工具交给 Agent，把决定留给自己。'
+                                  : view === 'history'
+                                    ? '每一次练习，都有迹可循。'
+                                    : '为你的学习，接入更多可能。'}
+                    </h1>
+                    <p>
+                      {view === 'formulas'
+                        ? '查公式、看条件、核对易错点，再带着理解回到练习。'
+                        : view === 'agent'
+                          ? '确认学习范围与能力，查看实际工具执行，并逐项审阅写入建议。'
+                          : view === 'history'
+                            ? '回看提交时的答案与反馈，找到下一次进步的起点。'
+                            : view === 'adapters'
+                              ? '从本地题库出发，逐步接入你自己的工具与 Agent。'
+                              : '选题 → 作答 → 审阅 → 重做：根据反馈改进答案，保留每次练习记录。'}
+                    </p>
                   </div>
-                  <h1>
-                    {view === 'practice'
-                      ? '今天，理解得更深一点。'
-                      : view === 'math'
-                        ? '把公式，变成可探索的图像。'
-                        : view === 'politics'
-                          ? '让每个观点，有理有据。'
-                          : view === 'geography'
-                            ? '在坐标里，发现联系。'
-                            : view === 'formulas'
-                              ? '把每个公式，用在合适的地方。'
-                              : view === 'agent'
-                                ? '把工具交给 Agent，把决定留给自己。'
-                                : view === 'history'
-                                  ? '每一次练习，都有迹可循。'
-                                  : '为你的学习，接入更多可能。'}
-                  </h1>
-                  <p>
-                    {view === 'formulas'
-                      ? '查公式、看条件、核对易错点，再带着理解回到练习。'
-                      : view === 'agent'
-                        ? '确认学习范围与能力，查看实际工具执行，并逐项审阅写入建议。'
-                        : view === 'history'
-                          ? '回看提交时的答案与反馈，找到下一次进步的起点。'
-                          : view === 'adapters'
-                            ? '从本地题库出发，逐步接入你自己的工具与 Agent。'
-                            : '选题 → 作答 → 审阅 → 重做：根据反馈改进答案，保留每次练习记录。'}
-                  </p>
+                  <div className="session-tag">
+                    <span className="status-dot" /> 自主练习 <span>·</span> 不限时
+                  </div>
                 </div>
-                <div className="session-tag">
-                  <span className="status-dot" /> 自主练习 <span>·</span> 不限时
-                </div>
-              </div>
+              )}
               {view === 'history' && (
                 <section className="learning-overview history-overview" aria-label="学习概览">
                   <h2>学习概览</h2>
@@ -805,6 +821,16 @@ export default function App() {
               <div hidden={view !== 'formulas'}>
                 <FormulaReference />
               </div>
+
+              {(view === 'challenge' || challengeVisited) && (
+                <div hidden={view !== 'challenge'}>
+                  {api && typeof api.getMathChallenges === 'function' ? (
+                    <MathChallenge api={api} visible={view === 'challenge'} />
+                  ) : (
+                    <p className="notice">请重启更新后的桌面应用，以使用数学挑战模式。</p>
+                  )}
+                </div>
+              )}
 
               {view === 'agent' && (
                 <AgentWorkbench
